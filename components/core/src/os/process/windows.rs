@@ -53,6 +53,24 @@ pub fn current_pid() -> u32 {
     unsafe { kernel32::GetCurrentProcessId() as u32 }
 }
 
+pub fn handle_from_pid(pid: Pid) -> Option<winapi::HANDLE> {
+    unsafe {
+        let proc_handle = kernel32::OpenProcess(
+            winapi::PROCESS_QUERY_LIMITED_INFORMATION | winapi::PROCESS_TERMINATE,
+            winapi::FALSE,
+            pid,
+        );
+
+        // we expect this to happen if the process died
+        // before OpenProcess completes
+        if proc_handle == ptr::null_mut() {
+            return None;
+        } else {
+            return Some(proc_handle);
+        }
+    }
+}
+
 /// Determines if a process is running with the given process identifier.
 pub fn is_alive(pid: Pid) -> bool {
     match handle_from_pid(pid) {
@@ -92,24 +110,6 @@ fn become_child_command(command: PathBuf, args: Vec<OsString>) -> Result<()> {
     let status = try!(Command::new(command).args(&args).status());
     // Let's honor the exit codes from the child process we finished running
     process::exit(status.code().unwrap())
-}
-
-fn handle_from_pid(pid: Pid) -> Option<winapi::HANDLE> {
-    unsafe {
-        let proc_handle = kernel32::OpenProcess(
-            winapi::PROCESS_QUERY_LIMITED_INFORMATION | winapi::PROCESS_TERMINATE,
-            winapi::FALSE,
-            pid,
-        );
-
-        // we expect this to happen if the process died
-        // before OpenProcess completes
-        if proc_handle == ptr::null_mut() {
-            return None;
-        } else {
-            return Some(proc_handle);
-        }
-    }
 }
 
 fn exit_status(handle: winapi::HANDLE) -> Result<u32> {

@@ -17,6 +17,7 @@ use std::time::Duration;
 use std::thread::{self, JoinHandle};
 
 use hab_net::server::{NetIdent, ZMQ_CONTEXT};
+use hab_net::heartbeat::{HeartbeatCli};
 use protobuf::Message;
 use protocol::jobsrv as proto;
 use zmq;
@@ -67,43 +68,6 @@ impl AsRef<str> for PulseState {
 impl Default for PulseState {
     fn default() -> PulseState {
         PulseState::Pulse
-    }
-}
-
-/// Client for sending and receiving messages to and from the HeartbeatMgr
-pub struct HeartbeatCli {
-    sock: zmq::Socket,
-    msg: zmq::Message,
-}
-
-impl HeartbeatCli {
-    /// Create a new HeartbeatMgr client
-    pub fn new() -> Self {
-        let sock = (**ZMQ_CONTEXT).as_mut().socket(zmq::REQ).unwrap();
-        HeartbeatCli {
-            sock: sock,
-            msg: zmq::Message::new().unwrap(),
-        }
-    }
-
-    /// Connect to the `HeartbeatMgr`
-    pub fn connect(&mut self) -> Result<()> {
-        try!(self.sock.connect(INPROC_ADDR));
-        Ok(())
-    }
-
-    /// Set the `HeartbeatMgr` state to busy
-    pub fn set_busy(&mut self) -> Result<()> {
-        try!(self.sock.send_str(PulseState::Pause.as_ref(), 0));
-        try!(self.sock.recv(&mut self.msg, 0));
-        Ok(())
-    }
-
-    /// Set the `HeartbeatMgr` state to ready
-    pub fn set_ready(&mut self) -> Result<()> {
-        try!(self.sock.send_str(PulseState::Pulse.as_ref(), 0));
-        try!(self.sock.recv(&mut self.msg, 0));
-        Ok(())
     }
 }
 

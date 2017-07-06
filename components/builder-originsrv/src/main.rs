@@ -30,6 +30,7 @@ const VERSION: &'static str = include_str!(concat!(env!("OUT_DIR"), "/VERSION"))
 const CFG_DEFAULT_PATH: &'static str = "/hab/svc/builder-originsrv/config.toml";
 
 fn main() {
+println!("Hello, this is the main method!");
     env_logger::init().unwrap();
     let matches = app().get_matches();
     debug!("CLI matches: {:?}", matches);
@@ -37,6 +38,7 @@ fn main() {
         Ok(result) => result,
         Err(e) => return exit_with(e, 1),
     };
+println!("one");
     match start(config) {
         Ok(_) => std::process::exit(0),
         Err(e) => exit_with(e, 1),
@@ -78,5 +80,6 @@ fn exit_with(err: Error, code: i32) {
 ///
 /// * Fails if the depot server fails to start - cannot bind to the port, etc.
 fn start(config: Config) -> Result<()> {
+println!("two");
     originsrv::server::run(config)
 }

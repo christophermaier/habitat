@@ -16,6 +16,7 @@ pub mod handlers;
 
 use std::ops::Deref;
 use std::sync::{Arc, RwLock};
+use std::{thread, time};
 
 use protocol::net;
 use zmq;
@@ -31,6 +32,8 @@ use data_store::DataStore;
 use error::{Error, Result};
 
 const BE_LISTEN_ADDR: &'static str = "inproc://backend";
+
+const HEARTBEAT_INTERVAL: u64 = 5;
 
 #[derive(Clone)]
 pub struct ServerState {
@@ -163,25 +166,52 @@ impl Application for Server {
     type Error = Error;
 
     fn run(&mut self) -> Result<()> {
+println!("four");
         try!(self.be_sock.bind(BE_LISTEN_ADDR));
         let broker = {
             let cfg = self.config.read().unwrap();
             Broker::run(Self::net_ident(), cfg.route_addrs())
         };
+
+println!("here is the broker!");
+println!("{:?}", broker);
+println!("five");
         let datastore = {
             let cfg = self.config.read().unwrap();
             DataStore::new(cfg.deref())?
         };
+println!("six");
         try!(datastore.setup());
+println!("seven");
         datastore.start_async();
+println!("eight");
         let cfg = self.config.clone();
+println!("nine!");
         let init_state = ServerState::new(datastore);
+println!("ten");
         let sup: Supervisor<Worker> = Supervisor::new(cfg, init_state);
+println!("eleven");
         try!(sup.start());
+println!("twelve");
         try!(self.connect());
+println!("thirteen");
         info!("builder-originsrv is ready to go.");
+println!("fourteen");
+
+        let interval = time::Duration::new(HEARTBEAT_INTERVAL, 0);
+        let running = true;
+
+//        while running {
+//            thread::sleep(interval);
+//            println!("RUNNING THE THING!!!!");
+//        }
+
+let join_result = broker.join().unwrap();
+println!("{:?}", join_result);
+
+println!("fifteen");
         try!(zmq::proxy(&mut self.router.socket, &mut self.be_sock));
-        broker.join().unwrap();
+//        broker.join().unwrap();
         Ok(())
     }
 }
@@ -211,5 +241,6 @@ impl Service for Server {
 impl NetIdent for Server {}
 
 pub fn run(config: Config) -> Result<()> {
+println!("three!");
     try!(Server::new(config)).run()
 }

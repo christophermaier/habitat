@@ -1027,6 +1027,20 @@ fn download_latest_origin_key(req: &mut Request) -> IronResult<Response> {
     Ok(response)
 }
 
+fn package_channels(req: &mut Request) -> IronResult<Response> {
+    let params = req.extensions.get::<Router>().unwrap();
+    let ident = ident_from_params(params);
+
+    let qualified = ident.fully_qualified();
+
+    if !ident.fully_qualified() {
+        error!("package_channels:1");
+        return Ok(Response::with(status::BadRequest));
+    }
+
+
+}
+
 fn download_package(req: &mut Request) -> IronResult<Response> {
     let lock = req.get::<persistent::State<DepotUtil>>().expect(
         "depot not found",
@@ -1990,10 +2004,8 @@ where
         packages_version: get "/pkgs/:origin/:pkg/:version" => list_packages,
         package_version_latest: get "/pkgs/:origin/:pkg/:version/latest" => show_package,
         package: get "/pkgs/:origin/:pkg/:version/:release" => show_package,
-
-        package_download: get "/pkgs/:origin/:pkg/:version/:release/download" => {
-            download_package
-        },
+        package_channels: get "/pkgs/:origin/:pkg/:version/:release/channels" => package_channels,
+        package_download: get "/pkgs/:origin/:pkg/:version/:release/download" => download_package,
         package_upload: post "/pkgs/:origin/:pkg/:version/:release" => {
             if insecure {
                 XHandler::new(upload_package)

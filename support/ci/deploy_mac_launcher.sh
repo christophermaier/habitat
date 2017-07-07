@@ -50,4 +50,4 @@ rm ${var_file}
 
 # kick off the build
 ssh ${ssh_args} ${mac_builder} \
-  "sudo ~/code/habitat/support/ci/deploy_mac.sh"
+  "sudo ~/code/$TRAVIS_BUILD_NUMBER/habitat/support/ci/deploy_mac.sh"

@@ -45,6 +45,7 @@ if [[ -h $gnu_tar ]]; then
   rm /usr/local/bin/tar
 fi
 
+echo "path is ${PATH}"
 # download a hab binary to get us started
 wget -O hab.tar.gz "${hab_download_url}"
 

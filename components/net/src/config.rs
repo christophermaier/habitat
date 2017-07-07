@@ -32,6 +32,11 @@ pub const DEV_GITHUB_CLIENT_ID: &'static str = "0c2f738a7d0bd300de10";
 /// additional comments.
 pub const DEV_GITHUB_CLIENT_SECRET: &'static str = "438223113eeb6e7edf2d2f91a232b72de72b9bdf";
 
+
+pub struct Config {
+
+}
+
 pub trait DispatcherCfg {
     fn default_worker_count() -> usize {
         // JW TODO: increase default count after r2d2 connection pools are moved to be owned

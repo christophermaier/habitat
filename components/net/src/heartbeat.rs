@@ -1,3 +1,6 @@
+use std::sync::{mpsc, Arc, RwLock};
+
+use config::Config;
 use error::Result;
 use server::{NetIdent, ZMQ_CONTEXT};
 use zmq;
@@ -70,3 +73,17 @@ impl HeartbeatCli {
         Ok(())
     }
 }
+
+/// Maintains and broadcasts health and state of the Worker server to consumers
+pub struct HeartbeatMgr {
+    /// Public socket for publishing worker state to consumers
+    pub pub_sock: zmq::Socket,
+    /// Internal socket for sending and receiving message to and from a `HeartbeatCli`
+    pub cli_sock: zmq::Socket,
+    state: PulseState,
+    config: Arc<RwLock<Config>>,
+    reg: proto::Heartbeat,
+    msg: zmq::Message,
+}
+
+

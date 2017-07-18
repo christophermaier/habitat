@@ -43,22 +43,33 @@ fn random_port() -> u16 {
     between.ind_sample(&mut rng)
 }
 
-/// Returns the path to the `hab-sup` executable generated for the
-/// test suite.
-pub fn sup_exe() -> PathBuf {
+/// Find an executable relative to the current integration testing
+/// executable.
+///
+/// Thus if the current executable is
+///
+///    /home/me/habitat/target/debug/deps/compilation-ccaf2f45c24e3840
+///
+/// and we look for `hab-sup`, we'll find it at
+///
+///    /home/me/habitat/target/debug/hab-sup
+///
+fn find_exe<B>(binary_name: B) -> PathBuf
+    where B: AsRef<Path>
+{
     let exe_root = env::current_exe()
         .unwrap()
-        .parent()
+        .parent()  // deps
         .unwrap()
-        .parent()
+        .parent()  // debug
         .unwrap()
         .to_path_buf();
-    let sup = exe_root.join("hab-sup");
+    let bin = exe_root.join(binary_name.as_ref());
     assert!(
-        sup.exists(),
-        format!("Expected to find a hab-sup executable at {:?}", sup)
+        bin.exists(),
+        format!("Expected to find a {:?} executable at {:?}", binary_name.as_ref(), bin)
     );
-    sup
+    bin
 }
 
 impl TestSup {
@@ -123,7 +134,10 @@ impl TestSup {
         P: ToString,
         S: ToString,
     {
-        let mut cmd = Command::new(sup_exe());
+        let sup_exe = find_exe("hab-sup");
+        let launcher_exe = find_exe("hab-launch");
+
+        let mut cmd = Command::new(&launcher_exe);
         let listen_host = "0.0.0.0";
 
         let origin = origin.to_string();
@@ -131,6 +145,7 @@ impl TestSup {
         let service_group = service_group.to_string();
 
         cmd.env("FS_ROOT", fs_root.as_ref().to_string_lossy().as_ref())
+            .env("HAB_SUP_BINARY", &sup_exe)
             .env("HAB_DEPOT_URL", "http://hab.sup.test/v1/depot")
             .arg("start")
             .arg("--listen-gossip")

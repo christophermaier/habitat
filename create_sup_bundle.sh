@@ -68,18 +68,32 @@ sup_packages=(core/hab-launcher/${launcher_version}
               core/hab-sup/${hab_version}
               core/hab-butterfly/${hab_version})
 
+# If the HAB_DEPOT_URL environment variable is set, we'll use that
+# when downloading packages. Otherwise, we'll just default to the
+# production depot.
+if [[ ! -z "${HAB_DEPOT_URL:-}" ]]
+then
+    log "Using HAB_DEPOT_URL from environment: ${HAB_DEPOT_URL}"
+    depot_flag="HAB_DEPOT_URL=${HAB_DEPOT_URL}"
+else
+    log "No HAB_DEPOT_URL detected; using the default"
+    depot_flag=
+fi
+
 # All packages that compose the Builder / Depot service. Not all need
 # to be installed on the same machine, but all need to be present in
 # our bundle.
-# TODO: These packages (in prod, anyway) seem to be rather old... we
-# may need to tweak them
-builder_packages=(core/hab-builder-api
-                  core/hab-builder-admin
-                  core/hab-builder-jobsrv
-                  core/hab-builder-router
-                  core/hab-builder-sessionsrv
-                  core/hab-builder-vault
-                  core/hab-builder-worker)
+builder_packages=(core/builder-api
+                  core/builder-api-proxy
+                  core/builder-admin
+                  core/builder-admin-proxy
+                  core/builder-datastore
+                  core/builder-jobsrv
+                  core/builder-originsrv
+                  core/builder-router
+                  core/builder-scheduler
+                  core/builder-sessionsrv
+                  core/builder-worker)
 
 # This is where we ultimately put all the things in S3.
 s3_bucket="habitat-builder-bootstrap"
@@ -102,7 +116,7 @@ log "Using ${sandbox_dir} as the Habitat root directory"
 
 for package in "${sup_packages[@]}" "${builder_packages[@]}"
 do
-    FS_ROOT=${sandbox_dir} ${hab} pkg install --channel=stable ${package} >&2
+    env FS_ROOT=${sandbox_dir} ${depot_flag} ${hab} pkg install --channel=stable ${package} >&2
 done
 
 ########################################################################

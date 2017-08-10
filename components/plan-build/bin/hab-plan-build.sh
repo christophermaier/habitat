@@ -463,7 +463,7 @@ unset TERMINFO
 # task.
 
 # **Internal** Handles exiting the program on signals. Takes either an argument
-# with the status code, or uses the last commands status code.
+# with the status code, or uses the last command's status code.
 #
 # For example, the below would exit with a status of 1.
 #

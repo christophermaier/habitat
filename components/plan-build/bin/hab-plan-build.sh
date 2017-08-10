@@ -49,7 +49,7 @@
 # 1. Run `./configure && make`
 # 1. Run `make install`
 # 1. Write out the data other packages need to depend on `zlib`
-# 1. Create a libsodium signed tarball of the results
+# 1. Create a libsodium-signed tarball of the results
 #
 # ## Plan Options
 #

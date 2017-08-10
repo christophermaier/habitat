@@ -24,7 +24,7 @@
 # pkg_name=zlib
 # pkg_description="The zlib library"
 # pkg_upstream_url=http://zlib.net
-# pkg_maintainer="Frank Llyod Wright <flw@example.com>"
+# pkg_maintainer="Frank Lloyd Wright <flw@example.com>"
 # pkg_version=1.2.8
 # pkg_license=('zlib')
 # pkg_source=http://downloads.sourceforge.net/project/libpng/$pkg_name/${pkg_version}/${pkg_name}-${pkg_version}.tar.gz
@@ -271,7 +271,7 @@
 # pkg_name=haproxy
 # pkg_version=1.5.12
 # pkg_license=('BSD')
-# pkg_maintainer="Frank Llyod Wright <flw@example.com>"
+# pkg_maintainer="Frank Lloyd Wright <flw@example.com>"
 # pkg_source=http://www.haproxy.org/download/1.5/src/${pkg_name}-${pkg_version}.tar.gz
 # pkg_filename=${pkg_name}-${pkg_version}.tar.gz
 # pkg_shasum=6648dd7d6b958d83dd7101eab5792178212a66c884bec0ebcd8abc39df83bb78

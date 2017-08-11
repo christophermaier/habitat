@@ -709,7 +709,8 @@ _resolve_dependency() {
 # _install_dependency acme/zlib/1.2.8/20151216221001
 # ```
 _install_dependency() {
-  if [[ -z "${NO_INSTALL_DEPS:-}" ]]; then
+    local dep="${1}"
+    if [[ -z "${NO_INSTALL_DEPS:-}" ]]; then
     $HAB_BIN install -u $HAB_BLDR_URL --channel $HAB_BLDR_CHANNEL "$dep" || {
       if [[ "$HAB_BLDR_CHANNEL" != "$FALLBACK_CHANNEL" ]]; then
         build_line "Trying to install '$dep' from '$FALLBACK_CHANNEL'"

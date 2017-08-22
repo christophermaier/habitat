@@ -2995,6 +2995,16 @@ do_default_end() {
 }
 
 # # Main Flow
+########################################################################
+
+
+
+
+
+
+
+
+
 
 # Parse depot flag (-u)
 OPTIND=2
@@ -3087,164 +3097,174 @@ for var in pkg_name pkg_origin; do
   fi
 done
 
-# Pass over `$pkg_svc_run` to replace any `$pkg_name` placeholder tokens
-# from prior pkg_svc_* variables that were set before the Plan was loaded.
-if [[ -n "${pkg_svc_run+xxx}" ]]; then
-  pkg_svc_run="$(echo $pkg_svc_run | sed "s|@__pkg_name__@|$pkg_name|g")"
-fi
+########################################################################
 
-if [[ -z "${pkg_version:-}" && "$(type -t pkg_version)" == "function" ]]; then
-  pkg_version="__pkg__version__unset__"
-elif [[ -z "${pkg_version:-}" ]]; then
-  e="Failed to build. 'pkg_version' must be set or 'pkg_version()' function"
-  e="$e must be implemented and then invoking by calling 'update_pkg_version()'."
-  exit_with "$e" 1
-fi
+# TODO (CM): Here's where it seems we might diverge for single
+# vs. composite plans
 
-# If `$pkg_source` is used, default `$pkg_filename` to the basename of
-# `$pkg_source` if it is not already set by the Plan.
-if [[ -n "${pkg_source:-}" && -z "${pkg_filename+xxx}" ]]; then
-  pkg_filename="$(basename "$pkg_source")"
-fi
-
-# Set `$pkg_dirname` to the `$pkg_name` and `$pkg_version`, if it is not
-# already set by the Plan.
-if [[ -z "${pkg_dirname+xxx}" ]]; then
-  pkg_dirname="${pkg_name}-${pkg_version}"
-  _pkg_dirname_initially_unset=true
-fi
-
-# Set `$pkg_prefix` if not already set by the Plan.
-if [[ -z "${pkg_prefix+xxx}" ]]; then
-  pkg_prefix=$HAB_PKG_PATH/${pkg_origin}/${pkg_name}/${pkg_version}/${pkg_release}
-fi
-
-# Set the cache path to be under the cache source root path
-CACHE_PATH="$HAB_CACHE_SRC_PATH/$pkg_dirname"
-
-# If `$pkg_source` is used, update the source path to build under the cache
-# source path.
-if [[ -n "${pkg_source:-}" ]]; then
-  SRC_PATH="$CACHE_PATH"
-fi
-
-if [[ -n "$HAB_OUTPUT_PATH" ]]; then
-  pkg_output_path="$HAB_OUTPUT_PATH"
+if [ "composite" == "${pkg_type+xxx}" ]
+then
+    echo "THIS IS A COMPOSITE PACKAGE"
 else
-  pkg_output_path="$INITIAL_PWD/results"
-fi
+    # Pass over `$pkg_svc_run` to replace any `$pkg_name` placeholder tokens
+    # from prior pkg_svc_* variables that were set before the Plan was loaded.
+    if [[ -n "${pkg_svc_run+xxx}" ]]; then
+        pkg_svc_run="$(echo $pkg_svc_run | sed "s|@__pkg_name__@|$pkg_name|g")"
+    fi
 
-# Set $pkg_svc variables a second time, now that the Plan has been sourced and
-# we have access to `$pkg_name`.
-pkg_svc_path="$HAB_ROOT_PATH/svc/$pkg_name"
-pkg_svc_data_path="$pkg_svc_path/data"
-pkg_svc_files_path="$pkg_svc_path/files"
-pkg_svc_var_path="$pkg_svc_path/var"
-pkg_svc_config_path="$pkg_svc_path/config"
-pkg_svc_static_path="$pkg_svc_path/static"
+    if [[ -z "${pkg_version:-}" && "$(type -t pkg_version)" == "function" ]]; then
+        pkg_version="__pkg__version__unset__"
+    elif [[ -z "${pkg_version:-}" ]]; then
+        e="Failed to build. 'pkg_version' must be set or 'pkg_version()' function"
+        e="$e must be implemented and then invoking by calling 'update_pkg_version()'."
+        exit_with "$e" 1
+    fi
 
-# Set the package artifact name
-_artifact_ext="hart"
-pkg_artifact="$HAB_CACHE_ARTIFACT_PATH/${pkg_origin}-${pkg_name}-${pkg_version}-${pkg_release}-${pkg_target}.${_artifact_ext}"
+    # If `$pkg_source` is used, default `$pkg_filename` to the basename of
+    # `$pkg_source` if it is not already set by the Plan.
+    if [[ -n "${pkg_source:-}" && -z "${pkg_filename+xxx}" ]]; then
+        pkg_filename="$(basename "$pkg_source")"
+    fi
 
-# Run `do_begin`
-build_line "$_program setup"
-do_begin
+    # Set `$pkg_dirname` to the `$pkg_name` and `$pkg_version`, if it is not
+    # already set by the Plan.
+    if [[ -z "${pkg_dirname+xxx}" ]]; then
+        pkg_dirname="${pkg_name}-${pkg_version}"
+        _pkg_dirname_initially_unset=true
+    fi
 
-# Write out a prebuild file so workers can have some metadata about failed builds
-_write_pre_build_file
+    # Set `$pkg_prefix` if not already set by the Plan.
+    if [[ -z "${pkg_prefix+xxx}" ]]; then
+        pkg_prefix=$HAB_PKG_PATH/${pkg_origin}/${pkg_name}/${pkg_version}/${pkg_release}
+    fi
 
-# Determine if we have all the commands we need to work
-_find_system_commands
+    # Set the cache path to be under the cache source root path
+    CACHE_PATH="$HAB_CACHE_SRC_PATH/$pkg_dirname"
 
-# Ensure that the origin key is available for package signing
-_ensure_origin_key_present
+    # If `$pkg_source` is used, update the source path to build under the cache
+    # source path.
+    if [[ -n "${pkg_source:-}" ]]; then
+        SRC_PATH="$CACHE_PATH"
+    fi
 
-_determine_hab_bin
+    if [[ -n "$HAB_OUTPUT_PATH" ]]; then
+        pkg_output_path="$HAB_OUTPUT_PATH"
+    else
+        pkg_output_path="$INITIAL_PWD/results"
+    fi
 
-_resolve_dependencies
+    # Set $pkg_svc variables a second time, now that the Plan has been sourced and
+    # we have access to `$pkg_name`.
+    pkg_svc_path="$HAB_ROOT_PATH/svc/$pkg_name"
+    pkg_svc_data_path="$pkg_svc_path/data"
+    pkg_svc_files_path="$pkg_svc_path/files"
+    pkg_svc_var_path="$pkg_svc_path/var"
+    pkg_svc_config_path="$pkg_svc_path/config"
+    pkg_svc_static_path="$pkg_svc_path/static"
 
-# Set up runtime environment
-_set_environment
+    # Set the package artifact name
+    _artifact_ext="hart"
+    pkg_artifact="$HAB_CACHE_ARTIFACT_PATH/${pkg_origin}-${pkg_name}-${pkg_version}-${pkg_release}-${pkg_target}.${_artifact_ext}"
 
-mkdir -pv "$HAB_CACHE_SRC_PATH"
+    # Run `do_begin`
+    build_line "$_program setup"
+    do_begin
 
-# Run any code after the environment is set but before the build starts
-do_before
+    # Write out a prebuild file so workers can have some metadata about failed builds
+    _write_pre_build_file
 
-# Download the source
-do_download
+    # Determine if we have all the commands we need to work
+    _find_system_commands
 
-# Verify the source
-do_verify
+    # Ensure that the origin key is available for package signing
+    _ensure_origin_key_present
 
-# Clean the cache
-do_clean
+    _determine_hab_bin
 
-# Unpack the source
-do_unpack
+    _resolve_dependencies
 
-# Set up the build environment
-_build_environment
+    # Set up runtime environment
+    _set_environment
 
-# Fix any libtool scripts in the source
-_fix_libtool
+    mkdir -pv "$HAB_CACHE_SRC_PATH"
 
-# Make sure all required variables are set
-_verify_vars
+    # Run any code after the environment is set but before the build starts
+    do_before
 
-# Prepare the source
-do_prepare_wrapper
+    # Download the source
+    do_download
 
-# Build the source
-do_build_wrapper
+    # Verify the source
+    do_verify
 
-# Check the source
-do_check_wrapper
+    # Clean the cache
+    do_clean
 
-# Install the source
-do_install_wrapper
+    # Unpack the source
+    do_unpack
 
-# Copy the configuration
-do_build_config
+    # Set up the build environment
+    _build_environment
 
-# Copy the service management scripts
-do_build_service
+    # Fix any libtool scripts in the source
+    _fix_libtool
 
-# Strip the binaries
-do_strip
+    # Make sure all required variables are set
+    _verify_vars
 
-# Run any code after the package has finished building and installing, but
-# before the artifact metadata is generated and the artifact is signed.
-do_after
+    # Prepare the source
+    do_prepare_wrapper
 
-# Write the manifest
-_build_manifest
+    # Build the source
+    do_build_wrapper
 
-# Render the linking and dependency files
-_build_metadata
+    # Check the source
+    do_check_wrapper
 
-# Generate the artifact and write to artifact cache
-_generate_artifact
+    # Install the source
+    do_install_wrapper
 
-# Copy produced artifact to a local relative directory
-_prepare_build_outputs
+    # Copy the configuration
+    do_build_config
 
-# Cleanup
-build_line "$_program cleanup"
-do_end
+    # Copy the service management scripts
+    do_build_service
 
-# Print the results
-build_line
-build_line "Source Path: $SRC_PATH"
-build_line "Installed Path: $pkg_prefix"
-build_line "Artifact: $pkg_output_path/$(basename "$pkg_artifact")"
-build_line "Build Report: $pkg_output_path/last_build.env"
-build_line "SHA256 Checksum: $_pkg_sha256sum"
-build_line "Blake2b Checksum: $_pkg_blake2bsum"
+    # Strip the binaries
+    do_strip
 
-# Exit cleanly
-build_line
-build_line "I love it when a plan.sh comes together."
-build_line
-_on_exit  0
+    # Run any code after the package has finished building and installing, but
+    # before the artifact metadata is generated and the artifact is signed.
+    do_after
+
+    # Write the manifest
+    _build_manifest
+
+    # Render the linking and dependency files
+    _build_metadata
+
+    # Generate the artifact and write to artifact cache
+    _generate_artifact
+
+    # Copy produced artifact to a local relative directory
+    _prepare_build_outputs
+
+    # Cleanup
+    build_line "$_program cleanup"
+    do_end
+
+    # Print the results
+    build_line
+    build_line "Source Path: $SRC_PATH"
+    build_line "Installed Path: $pkg_prefix"
+    build_line "Artifact: $pkg_output_path/$(basename "$pkg_artifact")"
+    build_line "Build Report: $pkg_output_path/last_build.env"
+    build_line "SHA256 Checksum: $_pkg_sha256sum"
+    build_line "Blake2b Checksum: $_pkg_blake2bsum"
+
+    # Exit cleanly
+    build_line
+    build_line "I love it when a plan.sh comes together."
+    build_line
+    _on_exit  0
+fi # composite / stand-alone processing switch

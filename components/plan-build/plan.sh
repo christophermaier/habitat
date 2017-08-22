@@ -4,7 +4,8 @@ pkg_version=$(cat "$PLAN_CONTEXT/../../VERSION")
 pkg_maintainer="The Habitat Maintainers <humans@habitat.sh>"
 pkg_license=('Apache-2.0')
 pkg_bin_dirs=(bin)
-
+pkg_build_deps=(core/bats
+                alasconnect/shellcheck)
 pkg_deps=(
   core/bash
   core/binutils
@@ -39,4 +40,11 @@ do_build() {
 
 do_install() {
   install -D $program $pkg_prefix/bin/$program
+}
+
+do_check() {
+    # TODO (CM): would be nice to have this, but there are a LOT of
+    # failures right now
+    # shellcheck $program
+    bats tests/*.bats
 }

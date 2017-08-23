@@ -3061,6 +3061,8 @@ fi
 # paths in `plan.sh`
 cd "$PLAN_CONTEXT"
 
+# TODO (CM): Set a default value for pkg_type HERE
+
 # Load the Plan
 build_line "Loading $PLAN_CONTEXT/plan.sh"
 if source "$PLAN_CONTEXT/plan.sh"; then
@@ -3102,10 +3104,79 @@ done
 # TODO (CM): Here's where it seems we might diverge for single
 # vs. composite plans
 
-if [ "composite" == "${pkg_type+xxx}" ]
+if [ "composite" == "${pkg_type}" ]
 then
-    echo "THIS IS A COMPOSITE PACKAGE"
+    # TODO (CM): Assert that we've got some services:
+    # - There should be at least two
+    # - They should actually be services (have a run hook)
+
+    # If you didn't specify any packages, why are you making a composite?
+    # If you only specified one, why aren't you just using that directly?
+    _ensure_more_than_one_service() {
+        if [ "${#pkg_services[@]}" -ge "2" ]
+        then
+            return 0
+        else
+            exit_with "A composite package should have at least two services specified in \$pkg_services; otherwise just build a non-composite Habitat package"
+        fi
+    }
+
+    _ensure_more_than_one_service
+
+    # Need to resolve the concrete services we're going to inspect
+    # DON'T NEED their dependencies, though.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 else
+    build_line "wait, pkg_type was ${pkg_type}"
     # Pass over `$pkg_svc_run` to replace any `$pkg_name` placeholder tokens
     # from prior pkg_svc_* variables that were set before the Plan was loaded.
     if [[ -n "${pkg_svc_run+xxx}" ]]; then

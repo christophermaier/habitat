@@ -3061,7 +3061,8 @@ fi
 # paths in `plan.sh`
 cd "$PLAN_CONTEXT"
 
-# TODO (CM): Set a default value for pkg_type HERE
+# TODO (CM): Set a default value for pkg_type HERE (standalone)
+# TODO (CM): Set a default value for pkg_services HERE (empty)
 
 # Load the Plan
 build_line "Loading $PLAN_CONTEXT/plan.sh"
@@ -3126,18 +3127,81 @@ then
     # Need to resolve the concrete services we're going to inspect
     # DON'T NEED their dependencies, though.
 
+    # TODO (CM): borrowed from resolve_run_dependencies & company;
+    # consider further refactoring and consolidation
 
+    # TODO (CM): Might want to make this a map of given package to
+    # resolved package?
 
+    resolved_services=()
 
+    # This assumes the existence of the `resolved_services` array
+    # variable, which is currently created outside of this function.
+    _resolve_service_dependencies() {
+        build_line "Resolving service dependencies"
 
+        local services=("${@}")
 
+        local resolved
+        local service
 
+        for service in "${services[@]}"; do
+            build_line "Installing ${service} locally"
+            _install_dependency "${service}"
+            if resolved="$(_resolve_dependency $service)"; then
+                build_line "Resolved service '$service' to $resolved"
+                resolved_services+=($resolved)
+            else
+                exit_with "Resolving '$service' failed, should this be built first?" 1
+            fi
+        done
+    }
 
+    # TODO (CM): OOF, this hurts
+    _find_system_commands
+    _determine_hab_bin
 
+    _resolve_service_dependencies "${pkg_services[@]}"
 
+    # Given a fully-qualified path to a package-on-disk, determine
+    # whether it is a service or not
+    _assert_package_is_a_service() {
+        local pkg_path="${1}"
+        build_line "Verifying that ${pkg_path} is a service"
+        if [ ! -e "${pkg_path}/run" ]
+        then
+            exit_with "'${pkg_path}' is not a service. Only services are allowed in composite packages"
+        fi
+    }
 
+    # Ensure that all the services are actually services.
+    for rs in "${resolved_services[@]}"
+    do
+        _assert_package_is_a_service "${rs}"
+    done
 
+    # Resolve the bind mappings!
 
+    # TODO (CM): other things could be rewritten in terms of this (DEPS,
+    # TDEPS, etc)
+    _read_metadata_file_for() {
+        local pkg_path="${1}"
+        local filename="${2}"
+        local full_path="${pkg_path}/${filename}"
+
+        if [[ -f "${full_path}" ]]
+        then
+            cat "${full_path}"
+        else
+            echo
+        fi
+    }
+
+    for rs in "${resolved_services[@]}"
+    do
+        build_line "BINDS for ${rs}"
+        _read_metadata_file_for "${rs}" BINDS
+    done
 
 
 

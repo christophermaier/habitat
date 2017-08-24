@@ -813,9 +813,13 @@ _return_or_append_to_set() {
 # [[ $(_array_contains "nope" "${arr[@]}") -ne 0 ]]
 # ```
 _array_contains() {
-  local e
+    local e
+
+    build_line "\$1 is $1"
+
   for e in "${@:2}"; do
-    if [[ "$e" == "$1" ]]; then
+      build_line "\$e is $e"
+      if [[ "$e" == "$1" ]]; then
       return 0
     fi
   done
@@ -3063,6 +3067,8 @@ cd "$PLAN_CONTEXT"
 
 # TODO (CM): Set a default value for pkg_type HERE (standalone)
 # TODO (CM): Set a default value for pkg_services HERE (empty)
+# TODO (CM): Set a default value for pkg_bind_map HERE (empty)
+declare -A pkg_bind_map
 
 # Load the Plan
 build_line "Loading $PLAN_CONTEXT/plan.sh"
@@ -3130,10 +3136,8 @@ then
     # TODO (CM): borrowed from resolve_run_dependencies & company;
     # consider further refactoring and consolidation
 
-    # TODO (CM): Might want to make this a map of given package to
-    # resolved package?
-
-    resolved_services=()
+    # associative array of "package-name-as-given" => "fully-qualified-name"
+    declare -A resolved_services
 
     # This assumes the existence of the `resolved_services` array
     # variable, which is currently created outside of this function.
@@ -3150,7 +3154,7 @@ then
             _install_dependency "${service}"
             if resolved="$(_resolve_dependency $service)"; then
                 build_line "Resolved service '$service' to $resolved"
-                resolved_services+=($resolved)
+                resolved_services[$service]=$resolved
             else
                 exit_with "Resolving '$service' failed, should this be built first?" 1
             fi
@@ -3175,9 +3179,12 @@ then
     }
 
     # Ensure that all the services are actually services.
-    for rs in "${resolved_services[@]}"
+    for rs in "${!resolved_services[@]}"
     do
-        _assert_package_is_a_service "${rs}"
+        build_line "Service: ${rs}"
+        resolved=${resolved_services[$rs]}
+        build_line "Resolved Service: ${resolved}"
+        _assert_package_is_a_service "${resolved}"
     done
 
     # Resolve the bind mappings!
@@ -3197,11 +3204,189 @@ then
         fi
     }
 
-    for rs in "${resolved_services[@]}"
+    # grab all the exports for the universe of packages
+    # e.g. core/builder-api-proxy => "foo bar baz"
+    # These don't need to be sorted since we need to see if each key
+    # from one list is contained in another.
+
+    # Assemble an "export map" of all services in this composite
+    declare -A pkg_export_map
+
+    _export_name() {
+        local line="${1}"
+        local key
+        local value
+        local original_ifs
+        original_ifs=${IFS}
+        IFS== read key value <<< "${line}"
+        IFS=${original_ifs}
+        echo $key
+    }
+
+    for rs in "${!resolved_services[@]}"
     do
-        build_line "BINDS for ${rs}"
-        _read_metadata_file_for "${rs}" BINDS
+        resolved=${resolved_services[$rs]}
+        exports=()
+
+
+        while read -r line
+        do
+            warn "Line when resolving exports for $resolved is: $line"
+            exports+=("${line%%=*}")
+
+        done < <(_read_metadata_file_for "${resolved}" EXPORTS)
+
+        # for line in "$(_read_metadata_file_for "${resolved}" EXPORTS)"
+        # do
+        #     build_line "EXPORT FOR $rs: $line"
+        #     export_name=$(_export_name ${line})
+        #     exports+=($export_name)
+        # done
+
+        pkg_export_map[$resolved]="${exports[@]}"
     done
+
+    # DEBUG
+    for rp in "${!pkg_export_map[@]}"
+    do
+        warn ">>>>>>>> $rp => ${pkg_export_map[$rp][@]}"
+    done
+    # DEBUG
+
+
+    # for p in ${!pkg_export_map[@]}
+    # do
+    #     build_line ">>> $p => ${pkg_export_map[$p]}"
+    # done
+
+    ########################################################################
+
+    # go through the pkg_bind_map
+    # For each key (= a package in the composite)
+    #    grab the binds for a given service, and examine THOSE exports
+    #    e.g. foo => "bla blah"
+    #
+    #    For each binding pair, see if all the keys of the bind are
+    # exported by the specified package
+    build_line ">>>>>>>>>> about to check out the binds <<<<<<<<<<"
+
+    # for bind_key in "${!pkg_bind_map[@]}"; do build_line "><><><> $bind_key"; done
+    # for bind_value in "${pkg_bind_map[@]}"; do build_line "><><><> $bind_value"; done
+
+    for pkg in "${!pkg_bind_map[@]}"
+    do
+        warn "Resolving binds for ${pkg}"
+
+        # TODO (CM): Here we are implicitly assuming that the values
+        # in the pkg_bind_map are exactly the same as given in
+        # pkg_services. Is this the right thing, or should we
+        # normalize to `origin/package` instead, regardless of what
+        # was given in pkg_services?
+
+        # Need to grab all the binds of `pkg` from its metadata on disk
+        unset all_binds_for_pkg
+        declare -A all_binds_for_pkg
+        resolved="${resolved_services[$pkg]}"
+        warn "> $pkg => $resolved"
+
+        while read -r line
+        do
+            IFS== read bind_name exports <<< "${line}"
+            all_binds_for_pkg[$bind_name]="${exports[@]}"
+        done < <(_read_metadata_file_for "${resolved}" BINDS)
+
+        # DEBUG
+        build_line "DEBUG: BINDS FOR $pkg"
+        for b in "${!all_binds_for_pkg[@]}"
+        do
+            build_line "DEBUG: Found ${b} => ${all_binds_for_pkg[$b][@]}"
+        done
+        # DEBUG
+
+        unset bind_mappings
+        bind_mappings=("${pkg_bind_map[$pkg]}")
+        warn "BIND MAPPINGS: ${bind_mappings[@]}"
+
+        for mapping in "${bind_mappings[@]}"
+        do
+            IFS=: read bind_name satisfying_package <<< "${mapping}"
+
+            build_line ">>>>> BIND_NAME: ${bind_name}"
+            build_line ">>>>> SATISFYING_PACKAGE: ${satisfying_package}"
+
+            # Assert that the named bind exists
+            if [ -z "${all_binds_for_pkg[$bind_name]}" ]
+            then
+                exit_with "The bind '${bind_name}' specified in \$pkg_bind_map for the package '${pkg}' does not exist in ${resolved_services[$pkg]}."
+                # TODO (CM): Why does adding this to the above exit
+                # message cause it to crash?
+
+                #It currently requires the following binds: ${!all_binds_for_pkg[@]}"
+            fi
+
+            resolved_satisfying_package="${resolved_services[$satisfying_package]}"
+            satisfying_package_exports=("${pkg_export_map[$resolved_satisfying_package][@]}")
+
+            warn "Checking in ${resolved_satisfying_package}"
+            warn ">>> exports ${satisfying_package_exports[@]}"
+
+            # Assert that the mapped service satisfies all the exports
+            # of this bind
+            for required_exported_value in ${all_binds_for_pkg[$bind_name][@]}
+            do
+                warn "REQUIRED EXPORTED VALUE FOR ${bind_name}: ${required_exported_value}"
+
+
+
+                if ! _array_contains "$required_exported_value" ${satisfying_package_exports[@]}
+                then
+                    exit_with "${satisfying_package} does not export '${required_exported_value}', which is required by the '${bind_name}' bind of $pkg"
+                fi
+
+
+
+
+            done
+
+        done
+    done
+
+    for rs in "${!resolved_services[@]}"
+    do
+        resolved=${resolved_services[$rs]}
+        build_line "BINDS for ${resolved}"
+        _read_metadata_file_for "${resolved}" BINDS
+    done
+
+    ########################################################
+    # Deployment Sets (TERRIBLE NAME)
+
+    
+
+
+
+
+
+
+
+
+
+    # TODO (CM): Write "sets" metadata file
+
+    # TODO (CM): Write bind mapping metadata file
+
+    # TODO (CM): Write resolved services metadata file
+
+    # TODO (CM): Write as-given services metadata file
+
+    # TODO (CM): Finally package everything up into a hart file
+
+
+
+
+
+
+
 
 
 

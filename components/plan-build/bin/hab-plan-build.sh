@@ -813,12 +813,8 @@ _return_or_append_to_set() {
 # [[ $(_array_contains "nope" "${arr[@]}") -ne 0 ]]
 # ```
 _array_contains() {
-    local e
-
-    build_line "\$1 is $1"
-
+  local e
   for e in "${@:2}"; do
-      build_line "\$e is $e"
       if [[ "$e" == "$1" ]]; then
       return 0
     fi
@@ -3068,7 +3064,14 @@ cd "$PLAN_CONTEXT"
 # TODO (CM): Set a default value for pkg_type HERE (standalone)
 # TODO (CM): Set a default value for pkg_services HERE (empty)
 # TODO (CM): Set a default value for pkg_bind_map HERE (empty)
+
 declare -A pkg_bind_map
+
+# TODO (CM): Set a default value for pkg_sets HERE (empty)
+# TODO Document the intention and key/value structure of this map
+declare -A pkg_sets
+
+# TODO (CM): Set default value for pkg_set_default here (none)?
 
 # Load the Plan
 build_line "Loading $PLAN_CONTEXT/plan.sh"
@@ -3113,6 +3116,94 @@ done
 
 if [ "composite" == "${pkg_type}" ]
 then
+    # TODO (CM): Some of this below is copied from the stand-alone package build
+    # steps... it needs to be pulled out into a separate function.
+
+
+    # # Pass over `$pkg_svc_run` to replace any `$pkg_name` placeholder tokens
+    # # from prior pkg_svc_* variables that were set before the Plan was loaded.
+    # if [[ -n "${pkg_svc_run+xxx}" ]]; then
+    #     pkg_svc_run="$(echo $pkg_svc_run | sed "s|@__pkg_name__@|$pkg_name|g")"
+    # fi
+
+    if [[ -z "${pkg_version:-}" && "$(type -t pkg_version)" == "function" ]]; then
+        pkg_version="__pkg__version__unset__"
+    elif [[ -z "${pkg_version:-}" ]]; then
+        e="Failed to build. 'pkg_version' must be set or 'pkg_version()' function"
+        e="$e must be implemented and then invoking by calling 'update_pkg_version()'."
+        exit_with "$e" 1
+    fi
+
+    # # If `$pkg_source` is used, default `$pkg_filename` to the basename of
+    # # `$pkg_source` if it is not already set by the Plan.
+    # if [[ -n "${pkg_source:-}" && -z "${pkg_filename+xxx}" ]]; then
+    #     pkg_filename="$(basename "$pkg_source")"
+    # fi
+
+    # Set `$pkg_dirname` to the `$pkg_name` and `$pkg_version`, if it is not
+    # already set by the Plan.
+    if [[ -z "${pkg_dirname+xxx}" ]]; then
+        pkg_dirname="${pkg_name}-${pkg_version}"
+        _pkg_dirname_initially_unset=true
+    fi
+
+    # Set `$pkg_prefix` if not already set by the Plan.
+    if [[ -z "${pkg_prefix+xxx}" ]]; then
+        pkg_prefix=$HAB_PKG_PATH/${pkg_origin}/${pkg_name}/${pkg_version}/${pkg_release}
+    fi
+
+    # Set the cache path to be under the cache source root path
+    CACHE_PATH="$HAB_CACHE_SRC_PATH/$pkg_dirname"
+
+    # If `$pkg_source` is used, update the source path to build under the cache
+    # source path.
+    if [[ -n "${pkg_source:-}" ]]; then
+        SRC_PATH="$CACHE_PATH"
+    fi
+
+    if [[ -n "$HAB_OUTPUT_PATH" ]]; then
+        pkg_output_path="$HAB_OUTPUT_PATH"
+    else
+        pkg_output_path="$INITIAL_PWD/results"
+    fi
+
+    # Set $pkg_svc variables a second time, now that the Plan has been sourced and
+    # we have access to `$pkg_name`.
+    pkg_svc_path="$HAB_ROOT_PATH/svc/$pkg_name"
+    pkg_svc_data_path="$pkg_svc_path/data"
+    pkg_svc_files_path="$pkg_svc_path/files"
+    pkg_svc_var_path="$pkg_svc_path/var"
+    pkg_svc_config_path="$pkg_svc_path/config"
+    pkg_svc_static_path="$pkg_svc_path/static"
+
+    # Set the package artifact name
+    _artifact_ext="hart"
+    pkg_artifact="$HAB_CACHE_ARTIFACT_PATH/${pkg_origin}-${pkg_name}-${pkg_version}-${pkg_release}-${pkg_target}.${_artifact_ext}"
+
+
+
+    # End copy
+    ############################################################################
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
     # TODO (CM): Assert that we've got some services:
     # - There should be at least two
     # - They should actually be services (have a run hook)
@@ -3169,12 +3260,17 @@ then
 
     # Given a fully-qualified path to a package-on-disk, determine
     # whether it is a service or not
+
+    # TODO (CM): Consolidate this better
     _assert_package_is_a_service() {
         local pkg_path="${1}"
         build_line "Verifying that ${pkg_path} is a service"
         if [ ! -e "${pkg_path}/run" ]
         then
+          if [ ! -e "${pkg_path}/hooks/run" ]
+          then
             exit_with "'${pkg_path}' is not a service. Only services are allowed in composite packages"
+          fi
         fi
     }
 
@@ -3307,7 +3403,8 @@ then
         bind_mappings=("${pkg_bind_map[$pkg]}")
         warn "BIND MAPPINGS: ${bind_mappings[@]}"
 
-        for mapping in "${bind_mappings[@]}"
+        # This is space-delimited, so no quotes?
+        for mapping in ${bind_mappings[@]}
         do
             IFS=: read bind_name satisfying_package <<< "${mapping}"
 
@@ -3325,6 +3422,9 @@ then
             fi
 
             resolved_satisfying_package="${resolved_services[$satisfying_package]}"
+
+            # TODO (CM): WORK ON THIS NEXT!!!!!!!!!!
+            # TODO (CM): Need to handle when a package does not export anything
             satisfying_package_exports=("${pkg_export_map[$resolved_satisfying_package][@]}")
 
             warn "Checking in ${resolved_satisfying_package}"
@@ -3361,38 +3461,97 @@ then
     ########################################################
     # Deployment Sets (TERRIBLE NAME)
 
-    
+    # Each set must consist of services listed in pkg_services
+    for set in "${!pkg_sets[@]}"
+    do
+      # The value of pkg_sets is a space-delimited string of entries, so don't quote
+      for member in ${pkg_sets[$set]}
+      do
+        if ! _array_contains "$member" "${pkg_services[@]}"
+        then
+          exit_with "Service set '$set' has '$member' as a member, but this was not listed in \$pkg_services"
+        fi
+      done
+    done
+
+    # TODO (CM): Validate the default set is actually a set
+    # TODO (CM): Do we default to everything being a set? Write that into the metadata file?
+    # TODO (CM): Should all services be accounted for in the union of all sets?
+    # TODO (CM): Should we allow one-member sets?
+
+    # TODO (CM): handle optional binds?
+
+    _render_composite_metadata() {
+        build_line "Building package metadata"
+
+        # Borrowed from _build_metadata()
+        local cutn="$(($(echo $HAB_PKG_PATH | grep -o '/' | wc -l)+2))"
+        local deps
+
+        build_line "CUTN $cutn"
+        build_line "$pkg_prefix/SERVICES"
+
+        # Render the services AS GIVEN IN THE PLAN
+        # TODO (CM): Sort these
+        deps="$(printf '%s\n' "${pkg_services[@]}")" # | cut -d "/" -f ${cutn}-)"
+        if [[ -n "$deps" ]]; then
+            echo "$deps" > $pkg_prefix/SERVICES
+        fi
+
+        # Render the services AS RESOLVED... this is just for human understanding
+        # TODO (CM): Sort these
+        deps="$(printf '%s\n' "${resolved_services[@]}" | cut -d "/" -f ${cutn}-)"
+        build_line "$pkg_prefix/RESOLVED_SERVICES"
+        if [[ -n "$deps" ]]; then
+            echo "$deps" > $pkg_prefix/RESOLVED_SERVICES
+        fi
+
+        # TODO (CM): What if there is no bind map?
+        build_line "$pkg_prefix/BIND_MAP"
+        for bind in "${!pkg_bind_map[@]}"; do
+          echo "$bind=${pkg_bind_map[$bind]}" >> $pkg_prefix/BIND_MAP
+        done
+
+        # TODO (CM): What if there are no service sets?
+        build_line "$pkg_prefix/SERVICE_SETS"
+        for set in "${!pkg_sets[@]}"; do
+          echo "$set=${pkg_sets[$set]}" >> $pkg_prefix/SERVICE_SETS
+        done
+        # TODO (CM): Where to put the default set?
+
+        # TODO (CM): This is copied from the other metadata function
+        echo "$pkg_target" > $pkg_prefix/TARGET
+        echo "${pkg_origin}/${pkg_name}/${pkg_version}/${pkg_release}" \
+          >> $pkg_prefix/IDENT
+
+
+
+
+    }
+
+    # TODO (CM): Noooooooooooo Where should this really go?
+    mkdir -pv "$pkg_prefix"
+
+    _render_composite_metadata
+
+
+    # TODO (CM): Get the processing of space-delimited array-like things standardized
 
 
 
 
 
 
+    _generate_artifact
+
+    # Copy produced artifact to a local relative directory
+    _prepare_build_outputs
+
+    # Cleanup
+    build_line "$_program cleanup"
 
 
-
-    # TODO (CM): Write "sets" metadata file
-
-    # TODO (CM): Write bind mapping metadata file
-
-    # TODO (CM): Write resolved services metadata file
-
-    # TODO (CM): Write as-given services metadata file
-
-    # TODO (CM): Finally package everything up into a hart file
-
-
-
-
-
-
-
-
-
-
-
-
-
+    # TODO (CM): Aaaaargh, can't install because it doesn't have an IDENT file
 
 
 

@@ -23,25 +23,6 @@ load ${BATS_TEST_DIRNAME}/../bin/lib.sh
 #   temp_del "$TEST_TEMP_DIR"
 # }
 
-@test "Cannot supply zero composite packages" {
-    pkgs=()
-    run _ensure_more_than_one_package "${pkgs[@]}"
-    assert_failure
-}
-
-@test "Cannot supply a single composite package" {
-    pkgs=(core/foo)
-    run _ensure_more_than_one_package "${pkgs[@]}"
-    assert_failure
-}
-
-@test "Must supply two or more composite packages" {
-    pkgs=(core/foo
-          core/bar)
-    run _ensure_more_than_one_package "${pkgs[@]}"
-    assert_success
-}
-
 @test "package metadata is written to the correct metadata file" {
     pkg_prefix=${BATS_TMPNAME}_pkg_prefix
     mkdir -p ${pkg_prefix}

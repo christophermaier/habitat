@@ -97,6 +97,8 @@ pub enum Error {
     InvalidPackageTarget(String),
     /// Occurs when validating a package target for an unsupported architecture.
     InvalidArchitecture(String),
+    /// Occurs when a package type is not recognized.
+    InvalidPackageType(String),
     /// Occurs when validating a package target for an unsupported platform.
     InvalidPlatform(String),
     /// Occurs when a service group string cannot be successfully parsed.
@@ -297,6 +299,7 @@ impl fmt::Display for Error {
                 )
             }
             Error::InvalidArchitecture(ref e) => format!("Invalid architecture: {}.", e),
+            Error::InvalidPackageType(ref e) => format!("Invalid package type: {}.", e),
             Error::InvalidPlatform(ref e) => format!("Invalid platform: {}.", e),
             Error::InvalidServiceGroup(ref e) => {
                 format!(
@@ -447,6 +450,7 @@ impl error::Error for Error {
                 "Package targets must be in architecture-platform format (example: x86_64-linux)"
             }
             Error::InvalidArchitecture(_) => "Unsupported target architecture supplied.",
+            Error::InvalidPackageType(_) => "Unsupported package type supplied.",
             Error::InvalidPlatform(_) => "Unsupported target platform supplied.",
             Error::InvalidServiceGroup(_) => {
                 "Service group strings must be in service.group format (example: redis.production)"

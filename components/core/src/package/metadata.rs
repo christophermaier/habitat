@@ -132,19 +132,20 @@ pub enum MetaFile {
     CFlags,
     Config,
     Deps,
-    TDeps,
     Environment,
     EnvironmentSep,
     Exports,
     Exposes,
     Ident,
-    LdRunPath,
     LdFlags,
+    LdRunPath,
     Manifest,
     Path,
-    SvcUser,
     SvcGroup,
+    SvcUser,
     Target,
+    TDeps,
+    Type,
 }
 
 impl fmt::Display for MetaFile {
@@ -155,21 +156,49 @@ impl fmt::Display for MetaFile {
             MetaFile::CFlags => "CFLAGS",
             MetaFile::Config => "default.toml",
             MetaFile::Deps => "DEPS",
-            MetaFile::TDeps => "TDEPS",
             MetaFile::Environment => "ENVIRONMENT",
             MetaFile::EnvironmentSep => "ENVIRONMENT_SEP",
             MetaFile::Exports => "EXPORTS",
             MetaFile::Exposes => "EXPOSES",
             MetaFile::Ident => "IDENT",
-            MetaFile::LdRunPath => "LD_RUN_PATH",
             MetaFile::LdFlags => "LDFLAGS",
+            MetaFile::LdRunPath => "LD_RUN_PATH",
             MetaFile::Manifest => "MANIFEST",
             MetaFile::Path => "PATH",
-            MetaFile::SvcUser => "SVC_USER",
             MetaFile::SvcGroup => "SVC_GROUP",
+            MetaFile::SvcUser => "SVC_USER",
             MetaFile::Target => "TARGET",
+            MetaFile::TDeps => "TDEPS",
+            MetaFile::Type => "TYPE",
         };
         write!(f, "{}", id)
+    }
+}
+
+pub enum PackageType {
+    Standalone,
+    Composite
+}
+
+impl fmt::Display for PackageType {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let id = match *self {
+            PackageType::Standalone => "Standalone",
+            PackageType::Composite => "Composite",
+        };
+        write!(f, "{}", id)
+    }
+}
+
+impl FromStr for PackageType {
+    type Err = Error;
+
+    fn from_str(value: &str) -> Result<Self> {
+        match value.as_ref() {
+            "standalone" => Ok(PackageType::Standalone),
+            "composite" => Ok(PackageType::Composite),
+            _ => Err(Error::InvalidPackageType(value.to_string())),
+        }
     }
 }
 

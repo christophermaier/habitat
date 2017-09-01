@@ -27,7 +27,7 @@ use toml;
 use toml::Value;
 
 use super::{Identifiable, PackageIdent, Target, PackageTarget};
-use super::metadata::{Bind, MetaFile, PkgEnv, parse_key_value};
+use super::metadata::{Bind, MetaFile, PackageType, PkgEnv, parse_key_value};
 use error::{Error, Result};
 use fs;
 
@@ -220,6 +220,15 @@ impl PackageInstall {
             true
         } else {
             false
+        }
+    }
+
+    /// Determine what kind of package this is.
+    pub fn pkg_type(&self) -> Result<PackageType> {
+        match self.read_metafile(MetaFile::Type) {
+            Ok(body) => body.parse(),
+            Err(Error::MetaFileNotFound(MetaFile::Type)) => Ok(PackageType::Standalone),
+            Err(e) => Err(e)
         }
     }
 

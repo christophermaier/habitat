@@ -232,6 +232,14 @@ impl PackageInstall {
         }
     }
 
+    /// Which services are contained in a composite package? Note that
+    /// these identifiers are *as given* in the initial `plan.sh` of
+    /// the composite, and not the fully-resolved identifiers you
+    /// would get from other "dependency" metadata files.
+    pub fn pkg_services(&self) -> Result<Vec<PackageIdent>> {
+        self.read_deps(MetaFile::Services)
+    }
+
     pub fn binds(&self) -> Result<Vec<Bind>> {
         match self.read_metafile(MetaFile::Binds) {
             Ok(body) => {

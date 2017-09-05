@@ -141,6 +141,7 @@ pub enum MetaFile {
     LdRunPath,
     Manifest,
     Path,
+    Services, // Composite-only
     SvcGroup,
     SvcUser,
     Target,
@@ -165,6 +166,7 @@ impl fmt::Display for MetaFile {
             MetaFile::LdRunPath => "LD_RUN_PATH",
             MetaFile::Manifest => "MANIFEST",
             MetaFile::Path => "PATH",
+            MetaFile::Services => "SERVICES",
             MetaFile::SvcGroup => "SVC_GROUP",
             MetaFile::SvcUser => "SVC_USER",
             MetaFile::Target => "TARGET",

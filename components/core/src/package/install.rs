@@ -529,6 +529,10 @@ impl PackageInstall {
     /// Reads metafiles containing dependencies represented by package identifiers separated by new
     /// lines.
     ///
+    /// In most cases, we want the identifiers to be fully qualified,
+    /// but in some cases (notably reading SERVICES from a composite
+    /// package), they do NOT need to be fully qualified.
+    ///
     /// # Failures
     ///
     /// * Metafile could not be found
@@ -536,12 +540,19 @@ impl PackageInstall {
     /// * Contents of the metafile are unreadable or malformed
     fn read_deps(&self, file: MetaFile) -> Result<Vec<PackageIdent>> {
         let mut deps: Vec<PackageIdent> = vec![];
+
+        // For now, all deps files but SERVICES need fully-qualified
+        // package identifiers
+        let must_be_fully_qualified = {
+            file != MetaFile::Services
+        };
+
         match self.read_metafile(file) {
             Ok(body) => {
                 if body.len() > 0 {
                     for id in body.lines() {
                         let package = PackageIdent::from_str(id)?;
-                        if !package.fully_qualified() {
+                        if !package.fully_qualified() && must_be_fully_qualified {
                             return Err(Error::FullyQualifiedPackageIdentRequired(
                                 package.to_string(),
                             ));

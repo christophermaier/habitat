@@ -246,6 +246,7 @@ _render_composite_metadata() {
     _render_metadata_IDENT
     _render_metadata_TARGET
     _render_metadata_FILES
+    _render_metadata_TYPE
 }
 
 # Render the services AS GIVEN IN THE PLAN; DO NOT perform any

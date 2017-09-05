@@ -1921,6 +1921,7 @@ _build_metadata() {
   _render_metadata_DEPS
   _render_metadata_TDEPS
   _render_metadata_TARGET
+  _render_metadata_TYPE
   _render_metadata_IDENT
 
   # Only generate `SVC_USER` & `SVC_GROUP` files if this package is a service.

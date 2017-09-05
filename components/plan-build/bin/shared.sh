@@ -226,6 +226,11 @@ _render_metadata_TDEPS() {
   _render_dependency_metadata_file ${pkg_prefix} TDEPS pkg_tdeps_resolved
 }
 
+_render_metadata_TYPE() {
+    debug "Rendering TYPE metadata file"
+    echo "$pkg_type" > $pkg_prefix/TYPE
+}
+
 # Metadata-rendering Helper Functions
 ########################################################################
 

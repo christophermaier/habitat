@@ -111,7 +111,8 @@ pub enum Error {
     LogonTypeNotGranted,
     /// Occurs when a call to LogonUserW fails
     LogonUserFailed(io::Error),
-    /// Occurs when a BIND or BIND_OPTIONAL MetaFile is read and contains a bad entry.
+    /// Occurs when a BIND, BIND_OPTIONAL, or BIND_MAP MetaFile is
+    /// read and contains a bad entry.
     MetaFileBadBind,
     /// Occurs when a package metadata file cannot be opened, read, or parsed.
     MetaFileMalformed(package::metadata::MetaFile),
@@ -324,7 +325,9 @@ impl fmt::Display for Error {
                 )
             }
             Error::LogonUserFailed(ref e) => format!("Failure calling LogonUserW: {:?}", e),
-            Error::MetaFileBadBind => format!("Bad value parsed from BIND or BIND_OPTIONAL"),
+            Error::MetaFileBadBind => {
+                format!("Bad value parsed from BIND, BIND_OPTIONAL, or BIND_MAP")
+            }
             Error::MetaFileMalformed(ref e) => {
                 format!("MetaFile: {:?}, didn't contain a valid UTF-8 string", e)
             }
@@ -464,7 +467,9 @@ impl error::Error for Error {
                 "Logon type not granted to hab_svc_user to be spawned by the Supervisor"
             }
             Error::LogonUserFailed(_) => "LogonUserW failed",
-            Error::MetaFileBadBind => "Bad value parsed from BIND or BIND_OPTIONAL MetaFile",
+            Error::MetaFileBadBind => {
+                "Bad value parsed from BIND, BIND_OPTIONAL, or BIND_MAP MetaFile"
+            }
             Error::MetaFileMalformed(_) => "MetaFile didn't contain a valid UTF-8 string",
             Error::MetaFileNotFound(_) => "Failed to read an archive's metafile",
             Error::MetaFileIO(_) => "MetaFile could not be read or written to",

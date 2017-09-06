@@ -21,6 +21,7 @@ use std::str::FromStr;
 use std::vec::IntoIter;
 
 use error::{Error, Result};
+use package::PackageIdent;
 
 #[cfg(not(windows))]
 const ENV_PATH_SEPARATOR: char = ':';
@@ -58,6 +59,35 @@ impl FromStr for Bind {
         Ok(Bind {
             service: service,
             exports: exports,
+        })
+    }
+}
+
+/// Describes a bind mapping in a composite package.
+#[derive(Debug, PartialEq)]
+pub struct BindMapping {
+    /// The name of the bind of a given service.
+    pub bind_name: String,
+    /// The identifier of the service within the composite package
+    /// that should satisfy the named bind.
+    pub satisfying_service: PackageIdent,
+}
+
+impl FromStr for BindMapping {
+    type Err = Error;
+
+    fn from_str(line: &str) -> Result<Self> {
+        let mut parts = line.split(':');
+        let bind_name = parts.next().and_then(|bn| Some(bn.to_string())).ok_or(
+            Error::MetaFileBadBind,
+        )?;
+        let satisfying_service = match parts.next() {
+            None => return Err(Error::MetaFileBadBind),
+            Some(satisfying_service) => satisfying_service.parse()?,
+        };
+        Ok(BindMapping {
+            bind_name: bind_name,
+            satisfying_service: satisfying_service,
         })
     }
 }
@@ -307,5 +337,25 @@ port=front-end.port
         ];
 
         assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn can_parse_a_valid_bind_mapping() {
+        let input = "my_bind:core/test";
+
+        let output: BindMapping = input.parse().unwrap();
+
+        assert_eq!(output.bind_name, "my_bind");
+        assert_eq!(
+            output.satisfying_service,
+            PackageIdent::from_str("core/test").unwrap()
+        );
+    }
+
+    #[test]
+    fn fails_to_parse_a_bind_mapping_with_an_invalid_service_identifier() {
+        let input = "my_bind:this-is-a-bad-identifier";
+        let output = input.parse::<BindMapping>();
+        assert!(output.is_err());
     }
 }

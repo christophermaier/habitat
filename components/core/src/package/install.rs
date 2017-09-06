@@ -27,7 +27,7 @@ use toml;
 use toml::Value;
 
 use super::{Identifiable, PackageIdent, Target, PackageTarget};
-use super::metadata::{Bind, MetaFile, PackageType, PkgEnv, parse_key_value};
+use super::metadata::{Bind, BindMapping, MetaFile, PackageType, PkgEnv, parse_key_value};
 use error::{Error, Result};
 use fs;
 
@@ -270,6 +270,30 @@ impl PackageInstall {
                 Ok(binds)
             }
             Err(Error::MetaFileNotFound(MetaFile::BindsOptional)) => Ok(Vec::new()),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Returns the bind mappings for a composite package.
+    pub fn bind_map(&self) -> Result<HashMap<PackageIdent, Vec<BindMapping>>> {
+        match self.read_metafile(MetaFile::BindMap) {
+            Ok(body) => {
+                let mut bind_map = HashMap::new();
+                for line in body.lines() {
+                    let mut parts = line.split("=");
+                    let package = match parts.next() {
+                        Some(ident) => ident.parse()?,
+                        None => return Err(Error::MetaFileBadBind),
+                    };
+                    let binds: Result<Vec<BindMapping>> = match parts.next() {
+                        Some(binds) => binds.split(" ").map(|b| b.parse()).collect(),
+                        None => Err(Error::MetaFileBadBind),
+                    };
+                    bind_map.insert(package, binds?);
+                }
+                Ok(bind_map)
+            }
+            Err(Error::MetaFileNotFound(MetaFile::BindMap)) => Ok(HashMap::new()),
             Err(e) => Err(e),
         }
     }
@@ -694,12 +718,17 @@ impl fmt::Display for PackageInstall {
 
 #[cfg(test)]
 mod test {
-    use std::str::FromStr;
+    use package::metadata::{BindMapping, MetaFile};
+    use std::collections::HashMap;
+    use std::fs::File;
+    use std::io::Write;
     use std::path::PathBuf;
-    use toml;
-    use super::super::PackageIdent;
+    use std::str::FromStr;
     use super::PackageInstall;
+    use super::super::PackageIdent;
     use super::super::test_support::*;
+    use tempdir::TempDir;
+    use toml;
 
     #[test]
     fn can_serialize_default_config() {
@@ -719,4 +748,104 @@ mod test {
             Err(e) => assert!(false, format!("{:?}", e)),
         }
     }
+
+    /// Create a `PackageInstall` struct for the explicit purpose of
+    /// testing metadata file interpretation. This exists to point to
+    /// a directory of metadata files, and that's it.
+    ///
+    /// You should pass in the path to a temporary directory for
+    /// `installed_path`.
+    fn fake_package_install(ident: &str, installed_path: PathBuf) -> PackageInstall {
+        PackageInstall {
+            ident: ident.parse().unwrap(),
+            fs_root_path: PathBuf::from(""),
+            package_root_path: PathBuf::from(""),
+            installed_path: installed_path,
+        }
+    }
+
+    /// Write the given contents into the specified metadata file for
+    /// the package.
+    fn write_metadata_file(pkg_install: &PackageInstall, metafile: MetaFile, content: &str) {
+        let path = pkg_install.installed_path().join(metafile.to_string());
+        let mut f = File::create(path).expect("Could not create metafile");
+        f.write_all(content.as_bytes()).expect(
+            "Could not write metafile contents",
+        );
+    }
+
+    #[test]
+    fn reading_a_valid_bind_map_file_works() {
+        // Create a testing package
+        let installed_path = TempDir::new("valid_bind_map").expect(
+            "Could not create installed_path temporary directory",
+        );
+        let package_install =
+            fake_package_install("core/composite", installed_path.path().to_path_buf());
+
+        // Create a BIND_MAP directory for that package
+        let bind_map_contents = r#"
+core/foo=db:core/database fe:core/front-end be:core/back-end
+core/bar=pub:core/publish sub:core/subscribe
+        "#;
+        write_metadata_file(&package_install, MetaFile::BindMap, bind_map_contents);
+
+        // Grab the bind map from that package
+        let bind_map = package_install.bind_map().unwrap();
+
+        // Assert that it was interpreted correctly
+        let mut expected: HashMap<PackageIdent, Vec<BindMapping>> = HashMap::new();
+        expected.insert(
+            "core/foo".parse().unwrap(),
+            vec![
+                "db:core/database".parse().unwrap(),
+                "fe:core/front-end".parse().unwrap(),
+                "be:core/back-end".parse().unwrap(),
+            ],
+        );
+        expected.insert(
+            "core/bar".parse().unwrap(),
+            vec![
+                "pub:core/publish".parse().unwrap(),
+                "sub:core/subscribe".parse().unwrap(),
+            ],
+        );
+
+        assert_eq!(expected, bind_map);
+    }
+
+    #[test]
+    fn reading_a_bad_bind_map_file_results_in_an_error() {
+        // Create a testing package
+        let installed_path = TempDir::new("invalid_bind_map").expect(
+            "Could not create installed_path temporary directory",
+        );
+        let package_install = fake_package_install("core/dud", installed_path.path().to_path_buf());
+
+        // Create a BIND_MAP directory for that package
+        let bind_map_contents = "core/foo=db:this-is-not-an-identifier";
+        write_metadata_file(&package_install, MetaFile::BindMap, bind_map_contents);
+
+        // Grab the bind map from that package
+        let bind_map = package_install.bind_map();
+        assert!(bind_map.is_err());
+    }
+
+    /// Composite packages don't need to have a BIND_MAP file, and
+    /// standalone packages will never have them. This is OK.
+    #[test]
+    fn missing_bind_map_files_are_ok() {
+        let installed_path = TempDir::new("missing_bind_map").expect(
+            "Could not create installed_path temporary directory",
+        );
+        let package_install =
+            fake_package_install("core/no-binds", installed_path.path().to_path_buf());
+
+        // Grab the bind map from that package
+        let bind_map = package_install.bind_map().unwrap();
+        assert!(bind_map.is_empty());
+
+    }
+
+
 }

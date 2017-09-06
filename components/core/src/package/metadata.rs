@@ -157,6 +157,7 @@ impl IntoIterator for PkgEnv {
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub enum MetaFile {
+    BindMap, // Composite-only
     Binds,
     BindsOptional,
     CFlags,
@@ -182,6 +183,7 @@ pub enum MetaFile {
 impl fmt::Display for MetaFile {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let id = match *self {
+            MetaFile::BindMap => "BIND_MAP",
             MetaFile::Binds => "BINDS",
             MetaFile::BindsOptional => "BINDS_OPTIONAL",
             MetaFile::CFlags => "CFLAGS",

@@ -224,7 +224,7 @@ impl<'a> InstallTask<'a> {
             return Ok(ident);
         }
 
-        self.install_package(ui, ident, None)
+        self.install_package(ui, ident)
     }
 
     fn from_artifact(&self, ui: &mut UI, artifact_path: &Path) -> Result<PackageIdent> {
@@ -238,26 +238,20 @@ impl<'a> InstallTask<'a> {
             ))?;
             return Ok(ident);
         }
-        self.store_artifact_in_cache(&ident, artifact_path)?;
-        let src_path = artifact_path.parent().unwrap();
 
-        self.install_package(ui, ident, Some(src_path))
+        self.store_artifact_in_cache(&ident, artifact_path)?;
+        self.install_package(ui, ident)
     }
 
-    fn install_package(
-        &self,
-        ui: &mut UI,
-        ident: PackageIdent,
-        src_path: Option<&Path>,
-    ) -> Result<PackageIdent> {
-        let mut artifact = self.get_cached_artifact(ui, ident.clone(), src_path)?;
+    fn install_package(&self, ui: &mut UI, ident: PackageIdent) -> Result<PackageIdent> {
+        let mut artifact = self.get_cached_artifact(ui, ident.clone())?;
         let mut artifacts: Vec<PackageArchive> = Vec::new();
 
         for ident in artifact.tdeps()? {
             if self.is_package_installed(&ident)? {
                 ui.status(Status::Using, &ident)?;
             } else {
-                artifacts.push(self.get_cached_artifact(ui, ident, src_path)?);
+                artifacts.push(self.get_cached_artifact(ui, ident)?);
             }
         }
         artifacts.push(artifact);
@@ -274,30 +268,29 @@ impl<'a> InstallTask<'a> {
         Ok(ident)
     }
 
-    fn get_cached_artifact(
-        &self,
-        ui: &mut UI,
-        ident: PackageIdent,
-        src_path: Option<&Path>,
-    ) -> Result<PackageArchive> {
+    fn get_cached_artifact(&self, ui: &mut UI, ident: PackageIdent) -> Result<PackageArchive> {
         if self.is_artifact_cached(&ident)? {
             debug!(
                 "Found {} in artifact cache, skipping remote download",
                 &ident
             );
         } else {
-            if retry(RETRIES,
-                     RETRY_WAIT,
-                     || self.fetch_artifact(ui, &ident, src_path),
-                     |res| res.is_ok())
-                       .is_err() {
-                return Err(Error::from(depot_client::Error::DownloadFailed(format!("We tried {} \
+            if retry(
+                RETRIES,
+                RETRY_WAIT,
+                || self.fetch_artifact(ui, &ident),
+                |res| res.is_ok(),
+            ).is_err()
+            {
+                return Err(Error::from(depot_client::Error::DownloadFailed(format!(
+                    "We tried {} \
                                                                                     times but \
                                                                                     could not \
                                                                                     download {}. \
                                                                                     Giving up.",
-                                                                                   RETRIES,
-                                                                                   &ident))));
+                    RETRIES,
+                    &ident
+                ))));
             }
         }
 
@@ -338,21 +331,8 @@ impl<'a> InstallTask<'a> {
         Ok(self.depot_client.show_package(ident, channel)?.into())
     }
 
-    fn fetch_artifact(
-        &self,
-        ui: &mut UI,
-        ident: &PackageIdent,
-        src_path: Option<&Path>,
-    ) -> Result<()> {
-        if let Some(src_path) = src_path {
-            let name = fully_qualified_archive_name(&ident)?;
-            let local_artifact = src_path.join(name);
-            if local_artifact.is_file() {
-                self.store_artifact_in_cache(ident, &local_artifact)?;
-                return Ok(());
-            }
-        }
 
+    fn fetch_artifact(&self, ui: &mut UI, ident: &PackageIdent) -> Result<()> {
         ui.status(Status::Downloading, ident)?;
         match self.depot_client.fetch_package(
             ident,

@@ -285,11 +285,7 @@ impl<'a> InstallTask<'a> {
             ).is_err()
             {
                 return Err(Error::from(depot_client::Error::DownloadFailed(format!(
-                    "We tried {} \
-                                                                                    times but \
-                                                                                    could not \
-                                                                                    download {}. \
-                                                                                    Giving up.",
+                    "We tried {} times but could not download {}. Giving up.",
                     RETRIES,
                     ident
                 ))));

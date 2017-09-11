@@ -224,7 +224,8 @@ impl<'a> InstallTask<'a> {
             return Ok(ident);
         }
 
-        self.install_package(ui, ident)
+        self.install_package(ui, &ident)?;
+        Ok(ident)
     }
 
     fn from_artifact(&self, ui: &mut UI, artifact_path: &Path) -> Result<PackageIdent> {
@@ -240,18 +241,19 @@ impl<'a> InstallTask<'a> {
         }
 
         self.store_artifact_in_cache(&ident, artifact_path)?;
-        self.install_package(ui, ident)
+        self.install_package(ui, &ident)?;
+        Ok(ident)
     }
 
-    fn install_package(&self, ui: &mut UI, ident: PackageIdent) -> Result<PackageIdent> {
-        let mut artifact = self.get_cached_artifact(ui, ident.clone())?;
+    fn install_package(&self, ui: &mut UI, ident: &PackageIdent) -> Result<()> {
+        let mut artifact = self.get_cached_artifact(ui, ident)?;
         let mut artifacts: Vec<PackageArchive> = Vec::new();
 
-        for ident in artifact.tdeps()? {
-            if self.is_package_installed(&ident)? {
-                ui.status(Status::Using, &ident)?;
+        for dep_ident in artifact.tdeps()?.iter() {
+            if self.is_package_installed(dep_ident)? {
+                ui.status(Status::Using, dep_ident)?;
             } else {
-                artifacts.push(self.get_cached_artifact(ui, ident)?);
+                artifacts.push(self.get_cached_artifact(ui, dep_ident)?);
             }
         }
         artifacts.push(artifact);
@@ -262,23 +264,23 @@ impl<'a> InstallTask<'a> {
         }
         ui.end(format!(
             "Install of {} complete with {} new packages installed.",
-            &ident,
+            ident,
             num_installed
         ))?;
-        Ok(ident)
+        Ok(())
     }
 
-    fn get_cached_artifact(&self, ui: &mut UI, ident: PackageIdent) -> Result<PackageArchive> {
+    fn get_cached_artifact(&self, ui: &mut UI, ident: &PackageIdent) -> Result<PackageArchive> {
         if self.is_artifact_cached(&ident)? {
             debug!(
                 "Found {} in artifact cache, skipping remote download",
-                &ident
+                ident
             );
         } else {
             if retry(
                 RETRIES,
                 RETRY_WAIT,
-                || self.fetch_artifact(ui, &ident),
+                || self.fetch_artifact(ui, ident),
                 |res| res.is_ok(),
             ).is_err()
             {
@@ -289,14 +291,14 @@ impl<'a> InstallTask<'a> {
                                                                                     download {}. \
                                                                                     Giving up.",
                     RETRIES,
-                    &ident
+                    ident
                 ))));
             }
         }
 
-        let mut artifact = PackageArchive::new(self.cached_artifact_path(&ident)?);
+        let mut artifact = PackageArchive::new(self.cached_artifact_path(ident)?);
         ui.status(Status::Verifying, artifact.ident()?)?;
-        self.verify_artifact(ui, &ident, &mut artifact)?;
+        self.verify_artifact(ui, ident, &mut artifact)?;
         Ok(artifact)
     }
 

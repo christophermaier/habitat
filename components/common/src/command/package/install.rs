@@ -150,7 +150,7 @@ impl<'a> InstallTask<'a> {
         Ok(res)
     }
 
-    pub fn from_ident(
+    fn from_ident(
         &self,
         ui: &mut UI,
         ident: PackageIdent,
@@ -226,7 +226,7 @@ impl<'a> InstallTask<'a> {
         self.install_package(ui, ident, None)
     }
 
-    pub fn from_artifact(&self, ui: &mut UI, artifact_path: &Path) -> Result<PackageIdent> {
+    fn from_artifact(&self, ui: &mut UI, artifact_path: &Path) -> Result<PackageIdent> {
         let ident = PackageArchive::new(artifact_path).ident()?;
         if self.is_package_installed(&ident)? {
             ui.status(Status::Using, &ident)?;

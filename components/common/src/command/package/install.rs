@@ -390,9 +390,9 @@ impl<'a> InstallTask<'a> {
     }
 
     fn cache_artifact(&self, ident: &PackageIdent, artifact_path: &Path) -> Result<()> {
-        let name = fully_qualified_archive_name(ident)?;
+        let cache_path = self.cached_artifact_path(ident)?;
         fs::create_dir_all(self.cache_artifact_path)?;
-        fs::copy(artifact_path, self.cache_artifact_path.join(name))?;
+        fs::copy(artifact_path, cache_path)?;
         Ok(())
     }
 

@@ -237,7 +237,7 @@ impl<'a> InstallTask<'a> {
             ))?;
             return Ok(ident);
         }
-        self.cache_artifact(&ident, artifact_path)?;
+        self.store_artifact_in_cache(&ident, artifact_path)?;
         let src_path = artifact_path.parent().unwrap();
 
         self.install_package(ui, ident, Some(src_path))
@@ -347,7 +347,7 @@ impl<'a> InstallTask<'a> {
             let name = fully_qualified_archive_name(&ident)?;
             let local_artifact = src_path.join(name);
             if local_artifact.is_file() {
-                self.cache_artifact(ident, &local_artifact)?;
+                self.store_artifact_in_cache(ident, &local_artifact)?;
                 return Ok(());
             }
         }
@@ -389,7 +389,7 @@ impl<'a> InstallTask<'a> {
         Ok(())
     }
 
-    fn cache_artifact(&self, ident: &PackageIdent, artifact_path: &Path) -> Result<()> {
+    fn store_artifact_in_cache(&self, ident: &PackageIdent, artifact_path: &Path) -> Result<()> {
         let cache_path = self.cached_artifact_path(ident)?;
         fs::create_dir_all(self.cache_artifact_path)?;
         fs::copy(artifact_path, cache_path)?;

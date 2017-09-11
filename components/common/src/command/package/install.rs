@@ -325,14 +325,7 @@ impl<'a> InstallTask<'a> {
     }
 
     fn cached_artifact_path(&self, ident: &PackageIdent) -> Result<PathBuf> {
-        let name = match ident.archive_name() {
-            Some(n) => n,
-            None => {
-                return Err(Error::HabitatCore(
-                    hcore::Error::InvalidPackageIdent(ident.to_string()),
-                ))
-            }
-        };
+        let name = fully_qualified_archive_name(ident)?;
         Ok(self.cache_artifact_path.join(name))
     }
 
@@ -351,14 +344,7 @@ impl<'a> InstallTask<'a> {
         src_path: Option<&Path>,
     ) -> Result<()> {
         if let Some(src_path) = src_path {
-            let name = match ident.archive_name() {
-                Some(n) => n,
-                None => {
-                    return Err(Error::HabitatCore(
-                        hcore::Error::InvalidPackageIdent(ident.to_string()),
-                    ))
-                }
-            };
+            let name = fully_qualified_archive_name(&ident)?;
             let local_artifact = src_path.join(name);
             if local_artifact.is_file() {
                 self.cache_artifact(ident, &local_artifact)?;
@@ -404,14 +390,7 @@ impl<'a> InstallTask<'a> {
     }
 
     fn cache_artifact(&self, ident: &PackageIdent, artifact_path: &Path) -> Result<()> {
-        let name = match ident.archive_name() {
-            Some(n) => n,
-            None => {
-                return Err(Error::HabitatCore(
-                    hcore::Error::InvalidPackageIdent(ident.to_string()),
-                ))
-            }
-        };
+        let name = fully_qualified_archive_name(ident)?;
         fs::create_dir_all(self.cache_artifact_path)?;
         fs::copy(artifact_path, self.cache_artifact_path.join(name))?;
         Ok(())
@@ -448,4 +427,15 @@ impl<'a> InstallTask<'a> {
         debug!("Verified {} signed by {}", ident, &nwr);
         Ok(())
     }
+}
+
+/// Adapter function wrapping `PackageIdent::archive_name` that
+/// returns an error if the identifier is not fully-qualified
+/// (only fully-qualified identifiers can yield an archive name).
+fn fully_qualified_archive_name(ident: &PackageIdent) -> Result<String> {
+    ident.archive_name().ok_or(Error::HabitatCore(
+        hcore::Error::FullyQualifiedPackageIdentRequired(
+            ident.to_string(),
+        ),
+    ))
 }

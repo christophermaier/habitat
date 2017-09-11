@@ -65,7 +65,7 @@ pub fn start<P1, P2>(
     product: &str,
     version: &str,
     fs_root_path: &P1,
-    cache_artifact_path: &P2,
+    artifact_cache_path: &P2,
     ignore_target: bool,
 ) -> Result<PackageIdent>
 where
@@ -90,7 +90,7 @@ where
         product,
         version,
         fs_root_path.as_ref(),
-        cache_artifact_path.as_ref(),
+        artifact_cache_path.as_ref(),
         &cache_key_path,
         ignore_target,
     )?;
@@ -105,7 +105,8 @@ where
 struct InstallTask<'a> {
     depot_client: Client,
     fs_root_path: &'a Path,
-    cache_artifact_path: &'a Path,
+    /// The path to the local artifact cache (e.g., /hab/cache/artifacts)
+    artifact_cache_path: &'a Path,
     cache_key_path: &'a Path,
     ignore_target: bool,
 }
@@ -116,14 +117,14 @@ impl<'a> InstallTask<'a> {
         product: &str,
         version: &str,
         fs_root_path: &'a Path,
-        cache_artifact_path: &'a Path,
+        artifact_cache_path: &'a Path,
         cache_key_path: &'a Path,
         ignore_target: bool,
     ) -> Result<Self> {
         Ok(InstallTask {
             depot_client: Client::new(url, product, version, Some(fs_root_path))?,
             fs_root_path: fs_root_path,
-            cache_artifact_path: cache_artifact_path,
+            artifact_cache_path: artifact_cache_path,
             cache_key_path: cache_key_path,
             ignore_target: ignore_target,
         })
@@ -326,7 +327,7 @@ impl<'a> InstallTask<'a> {
 
     fn cached_artifact_path(&self, ident: &PackageIdent) -> Result<PathBuf> {
         let name = fully_qualified_archive_name(ident)?;
-        Ok(self.cache_artifact_path.join(name))
+        Ok(self.artifact_cache_path.join(name))
     }
 
     fn fetch_latest_pkg_ident_for(
@@ -355,7 +356,7 @@ impl<'a> InstallTask<'a> {
         ui.status(Status::Downloading, ident)?;
         match self.depot_client.fetch_package(
             ident,
-            self.cache_artifact_path,
+            self.artifact_cache_path,
             ui.progress(),
         ) {
             Ok(_) => Ok(()),
@@ -391,7 +392,7 @@ impl<'a> InstallTask<'a> {
 
     fn store_artifact_in_cache(&self, ident: &PackageIdent, artifact_path: &Path) -> Result<()> {
         let cache_path = self.cached_artifact_path(ident)?;
-        fs::create_dir_all(self.cache_artifact_path)?;
+        fs::create_dir_all(self.artifact_cache_path)?;
         fs::copy(artifact_path, cache_path)?;
         Ok(())
     }

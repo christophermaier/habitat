@@ -156,6 +156,18 @@ impl<'a> InstallTask<'a> {
         })
     }
 
+    /// Install a package from the Depot, based on a given identifier.
+    ///
+    /// If the identifier is fully-qualified, that specific package
+    /// release will be installed (if it exists in the Depot).
+    ///
+    /// However, if the identifier is _not_ fully-qualified, the
+    /// latest version from the given channel will be installed
+    /// instead.
+    ///
+    /// In either case, the identifier returned is that of the package
+    /// that was installed (which, as we have seen, may not be the
+    /// same as the identifier that was passed in).
     fn from_ident(
         &self,
         ui: &mut UI,

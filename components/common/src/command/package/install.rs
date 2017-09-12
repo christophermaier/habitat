@@ -260,7 +260,7 @@ impl<'a> InstallTask<'a> {
 
         let num_installed = artifacts.len();
         for mut artifact in artifacts {
-            self.extract_artifact(ui, &mut artifact)?;
+            self.unpack_artifact(ui, &mut artifact)?;
         }
         ui.end(format!(
             "Install of {} complete with {} new packages installed.",
@@ -298,7 +298,8 @@ impl<'a> InstallTask<'a> {
         Ok(artifact)
     }
 
-    fn extract_artifact(&self, ui: &mut UI, artifact: &mut PackageArchive) -> Result<()> {
+    /// Adapter function wrapping `PackageArchive::unpack`
+    fn unpack_artifact(&self, ui: &mut UI, artifact: &mut PackageArchive) -> Result<()> {
         artifact.unpack(Some(self.fs_root_path))?;
         ui.status(Status::Installed, artifact.ident()?)?;
         Ok(())

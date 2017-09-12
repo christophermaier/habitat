@@ -221,10 +221,10 @@ impl<'a> InstallTask<'a> {
                 &ident,
                 0
             ))?;
-            return Ok(ident);
+        } else {
+            self.install_package(ui, &ident)?;
         }
 
-        self.install_package(ui, &ident)?;
         Ok(ident)
     }
 
@@ -237,11 +237,11 @@ impl<'a> InstallTask<'a> {
                 &ident,
                 0
             ))?;
-            return Ok(ident);
+        } else {
+            self.store_artifact_in_cache(&ident, artifact_path)?;
+            self.install_package(ui, &ident)?;
         }
 
-        self.store_artifact_in_cache(&ident, artifact_path)?;
-        self.install_package(ui, &ident)?;
         Ok(ident)
     }
 

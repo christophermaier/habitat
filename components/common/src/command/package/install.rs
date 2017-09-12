@@ -90,13 +90,13 @@ pub fn start<P1, P2>(
     ident_or_archive: &str,
     product: &str,
     version: &str,
-    fs_root_path: &P1,
-    artifact_cache_path: &P2,
+    fs_root_path: P1,
+    artifact_cache_path: P2,
     ignore_target: bool,
 ) -> Result<PackageIdent>
 where
-    P1: AsRef<Path> + ?Sized,
-    P2: AsRef<Path> + ?Sized,
+    P1: AsRef<Path>,
+    P2: AsRef<Path>,
 {
     if env::var_os("HAB_NON_ROOT").is_none() && !am_i_root() {
         ui.warn(

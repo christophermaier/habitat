@@ -172,27 +172,28 @@ impl<'a> InstallTask<'a> {
             ui.begin(format!("Installing {}", &ident))?;
         }
 
-        let mut ident = ident;
-        if !ident.fully_qualified() {
-            ident = match self.fetch_latest_pkg_ident_for(&ident, channel) {
-                Ok(ident) => ident,
+
+        // The "target_ident" will be the fully-qualified identifier
+        // of the package we will ultimately install, once we
+        // determine if we need to get a more recent version or not.
+        let target_ident = if !ident.fully_qualified() {
+            match self.fetch_latest_pkg_ident_for(&ident, channel) {
+                Ok(latest_ident) => latest_ident,
                 Err(Error::DepotClient(APIError(StatusCode::NotFound, _))) => {
-                    match self.get_channel_recommendations(&ident) {
-                        Ok(channels) => {
-                            if !channels.is_empty() {
-                                ui.warn(
-                                    "The package does not have any versions in the specified channel.",
-                                )?;
-                                ui.warn(
-                                    "Did you intend to install one of the folowing instead?",
-                                )?;
-                                for c in channels {
-                                    ui.warn(format!("  {} in channel {}", c.1, c.0))?;
-                                }
+                    if let Ok(recommendations) = self.get_channel_recommendations(&ident) {
+                        if !recommendations.is_empty() {
+                            ui.warn(
+                                "The package does not have any versions in the specified channel.",
+                            )?;
+                            ui.warn(
+                                "Did you intend to install one of the folowing instead?",
+                            )?;
+                            for r in recommendations {
+                                ui.warn(format!("  {} in channel {}", r.1, r.0))?;
                             }
                         }
-                        Err(_) => (),
                     }
+
                     return Err(Error::PackageNotFound);
                 }
                 Err(e) => {
@@ -201,8 +202,12 @@ impl<'a> InstallTask<'a> {
                 }
             }
         } else {
-            if channel.is_some() {
-                let ch = channel.unwrap().to_string();
+            // This is just outputting some information in case the
+            // fully-qualified identifier we were given isn't actually
+            // in this channel. It shouldn't matter, though, because we've got
+            // a fully-qualified identifier.
+            if let Some(channel) = channel {
+                let ch = channel.to_string();
                 match self.depot_client.package_channels(&ident) {
                     Ok(channels) => {
                         if channels.iter().find(|ref c| ***c == ch).is_none() {
@@ -217,20 +222,22 @@ impl<'a> InstallTask<'a> {
                     }
                 };
             }
-        }
 
-        if self.is_package_installed(&ident)? {
-            ui.status(Status::Using, &ident)?;
+            ident
+        };
+
+        if self.is_package_installed(&target_ident)? {
+            ui.status(Status::Using, &target_ident)?;
             ui.end(format!(
                 "Install of {} complete with {} new packages installed.",
-                &ident,
+                &target_ident,
                 0
             ))?;
         } else {
-            self.install_package(ui, &ident)?;
+            self.install_package(ui, &target_ident)?;
         }
 
-        Ok(ident)
+        Ok(target_ident)
     }
 
     /// Get a list of suggested package identifiers from all

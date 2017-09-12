@@ -249,11 +249,13 @@ impl<'a> InstallTask<'a> {
         let mut artifact = self.get_cached_artifact(ui, ident)?;
         let mut artifacts: Vec<PackageArchive> = Vec::new();
 
-        for dep_ident in artifact.tdeps()?.iter() {
-            if self.is_package_installed(dep_ident)? {
-                ui.status(Status::Using, dep_ident)?;
+        // Ensure that all transitive dependencies are cached
+        let dependencies = artifact.tdeps()?;
+        for dependency in dependencies.iter() {
+            if self.is_package_installed(dependency)? {
+                ui.status(Status::Using, dependency)?;
             } else {
-                artifacts.push(self.get_cached_artifact(ui, dep_ident)?);
+                artifacts.push(self.get_cached_artifact(ui, dependency)?);
             }
         }
         artifacts.push(artifact);

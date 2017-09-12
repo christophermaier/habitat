@@ -247,28 +247,31 @@ impl<'a> InstallTask<'a> {
 
     fn install_package(&self, ui: &mut UI, ident: &PackageIdent) -> Result<()> {
         let mut artifact = self.get_cached_artifact(ui, ident)?;
-        let mut artifacts: Vec<PackageArchive> = Vec::new();
 
-        // Ensure that all transitive dependencies are cached
+        // Ensure that all transitive dependencies, as well as the
+        // original package itself, are cached locally.
         let dependencies = artifact.tdeps()?;
+        let mut artifacts_to_install = Vec::with_capacity(dependencies.len() + 1);
         for dependency in dependencies.iter() {
             if self.is_package_installed(dependency)? {
                 ui.status(Status::Using, dependency)?;
             } else {
-                artifacts.push(self.get_cached_artifact(ui, dependency)?);
+                artifacts_to_install.push(self.get_cached_artifact(ui, dependency)?);
             }
         }
-        artifacts.push(artifact);
+        artifacts_to_install.push(artifact);
 
-        let num_installed = artifacts.len();
-        for mut artifact in artifacts {
-            self.unpack_artifact(ui, &mut artifact)?;
+        // Ensure all uninstalled artifacts get installed
+        for artifact in artifacts_to_install.iter_mut() {
+            self.unpack_artifact(ui, artifact)?;
         }
+
         ui.end(format!(
             "Install of {} complete with {} new packages installed.",
             ident,
-            num_installed
+            artifacts_to_install.len()
         ))?;
+
         Ok(())
     }
 

@@ -156,27 +156,6 @@ impl<'a> InstallTask<'a> {
         })
     }
 
-    fn get_channel_recommendations(&self, ident: &PackageIdent) -> Result<Vec<(String, String)>> {
-        let mut res = Vec::new();
-
-        let channels = match self.depot_client.list_channels(ident.origin()) {
-            Ok(channels) => channels,
-            Err(e) => {
-                debug!("Failed to get channel list: {:?}", e);
-                return Err(Error::PackageNotFound);
-            }
-        };
-
-        for channel in channels {
-            match self.fetch_latest_pkg_ident_for(ident, Some(&channel)) {
-                Ok(pkg) => res.push((channel, format!("{}", pkg))),
-                Err(_) => (),
-            };
-        }
-
-        Ok(res)
-    }
-
     fn from_ident(
         &self,
         ui: &mut UI,
@@ -252,6 +231,32 @@ impl<'a> InstallTask<'a> {
         }
 
         Ok(ident)
+    }
+
+    /// Get a list of suggested package identifiers from all
+    /// channels. This is used to generate actionable user feedback
+    /// when the desired package was not found in the specified
+    /// channel.
+    fn get_channel_recommendations(&self, ident: &PackageIdent) -> Result<Vec<(String, String)>> {
+        let mut res = Vec::new();
+
+        let channels = match self.depot_client.list_channels(ident.origin()) {
+            Ok(channels) => channels,
+            Err(e) => {
+                debug!("Failed to get channel list: {:?}", e);
+                return Err(Error::PackageNotFound); // TODO (CM): is
+                // this the appropriate error?
+            }
+        };
+
+        for channel in channels {
+            match self.fetch_latest_pkg_ident_for(ident, Some(&channel)) {
+                Ok(pkg) => res.push((channel, format!("{}", pkg))),
+                Err(_) => (),
+            };
+        }
+
+        Ok(res)
     }
 
     /// Given the path to an artifact on disk, ensure that it is

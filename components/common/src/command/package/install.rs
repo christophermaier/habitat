@@ -112,7 +112,7 @@ struct InstallTask<'a> {
 }
 
 impl<'a> InstallTask<'a> {
-    pub fn new(
+    fn new(
         url: &str,
         product: &str,
         version: &str,

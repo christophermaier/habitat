@@ -310,6 +310,8 @@ impl<'a> InstallTask<'a> {
         Ok(())
     }
 
+    /// Is the package already unpacked / installed (i.e., present in
+    /// `/hab/pkgs/$ORIGIN/$PACKAGE/$VERSION/$RELEASE`)?
     fn is_package_installed(&self, ident: &PackageIdent) -> Result<bool> {
         match PackageInstall::load(ident, Some(self.fs_root_path)) {
             Ok(_) => Ok(true),

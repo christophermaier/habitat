@@ -57,6 +57,32 @@ use retry::retry;
 pub const RETRIES: u64 = 5;
 pub const RETRY_WAIT: u64 = 3000;
 
+/// Install a Habitat package.
+///
+/// A package may be installed in one of two ways. First, the
+/// identifier of a package may be given. This may be any of the
+/// following forms:
+///
+/// * origin/package
+/// * origin/package/version
+/// * origin/package/version/release
+///
+/// The final of these forms is "fully-qualified".
+///
+/// If a fully-qualified identifier is provided, then this exact
+/// artifact will be retrieved from the depot. If either of the other
+/// identifier forms are given, we attempt to install the latest
+/// appropriate version from the given channel.
+///
+/// Instead of a package identifier, the path to a local `.hart`
+/// archive on disk may be provided. This exact artifact will be
+/// installed, instead of making a call to the depot.
+///
+/// In _both_ cases, any dependencies of the artifacts will installed
+/// from the depot.
+///
+/// At the end of this function, the specified package and all its
+/// dependencies will be installed on the system.
 pub fn start<P1, P2>(
     ui: &mut UI,
     url: &str,
@@ -228,6 +254,8 @@ impl<'a> InstallTask<'a> {
         Ok(ident)
     }
 
+    /// Given the path to an artifact on disk, ensure that it is
+    /// properly installed and return the package's identifier.
     fn from_artifact(&self, ui: &mut UI, artifact_path: &Path) -> Result<PackageIdent> {
         let ident = PackageArchive::new(artifact_path).ident()?;
         if self.is_package_installed(&ident)? {
@@ -245,6 +273,13 @@ impl<'a> InstallTask<'a> {
         Ok(ident)
     }
 
+    /// Given the identifier of an artifact, ensure that the artifact,
+    /// as well as all its dependencies, have been cached and
+    /// installed.
+    ///
+    /// If the package is already present in the cache, it is not
+    /// re-downloaded. Any dependencies of the package that are not
+    /// installed will be re-cached (as needed) and installed.
     fn install_package(&self, ui: &mut UI, ident: &PackageIdent) -> Result<()> {
         let mut artifact = self.get_cached_artifact(ui, ident)?;
 
@@ -275,6 +310,8 @@ impl<'a> InstallTask<'a> {
         Ok(())
     }
 
+    /// This ensures the identified package is in the local cache,
+    /// verifies it, and returns a handle to the package's metadata.
     fn get_cached_artifact(&self, ui: &mut UI, ident: &PackageIdent) -> Result<PackageArchive> {
         if self.is_artifact_cached(&ident)? {
             debug!(
@@ -324,6 +361,9 @@ impl<'a> InstallTask<'a> {
         Ok(self.cached_artifact_path(ident)?.is_file())
     }
 
+    /// Returns the path to the location this package would exist at in
+    /// the local package cache. It does not mean that the package is
+    /// actually *in* the package cache, though.
     fn cached_artifact_path(&self, ident: &PackageIdent) -> Result<PathBuf> {
         let name = fully_qualified_archive_name(ident)?;
         Ok(self.artifact_cache_path.join(name))
@@ -338,6 +378,8 @@ impl<'a> InstallTask<'a> {
     }
 
 
+    /// Retrieve the identified package from the depot, ensuring that
+    /// the artifact is cached locally.
     fn fetch_artifact(&self, ui: &mut UI, ident: &PackageIdent) -> Result<()> {
         ui.status(Status::Downloading, ident)?;
         match self.depot_client.fetch_package(
@@ -376,6 +418,7 @@ impl<'a> InstallTask<'a> {
         Ok(())
     }
 
+    /// Copies the artifact to the local artifact cache directory
     fn store_artifact_in_cache(&self, ident: &PackageIdent, artifact_path: &Path) -> Result<()> {
         let cache_path = self.cached_artifact_path(ident)?;
         fs::create_dir_all(self.artifact_cache_path)?;

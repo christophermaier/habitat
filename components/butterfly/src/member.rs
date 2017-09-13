@@ -208,6 +208,14 @@ pub type UuidSimple = String;
 #[derive(Debug, Clone)]
 pub struct MemberList {
     pub members: Arc<RwLock<HashMap<UuidSimple, Member>>>,
+    /// Simple mapping of member ID to their current health
+    // TODO (CM): I'd like to rename this to something like
+    // "member_health" so it's easier to navigate this file (nice to
+    // differentiate it from Health instances). That'll require tweaks
+    // to the serialization / deserialization logic, though, because
+    // those keys are linked to these members right now.
+    //
+    // Also, does this _really_ need to be public?
     pub health: Arc<RwLock<HashMap<UuidSimple, Health>>>,
     suspect: Arc<RwLock<HashMap<UuidSimple, SteadyTime>>>,
     depart: Arc<RwLock<HashMap<UuidSimple, SteadyTime>>>,
@@ -289,6 +297,8 @@ impl MemberList {
     }
 
     /// Inserts a member into the member list with the given health.
+    // NOTE (CM): OK, the global health map gets updated here
+
     pub fn insert(&self, member: Member, health: Health) -> bool {
         let share_rumor: bool;
         let mut start_suspicion: bool = false;
@@ -399,6 +409,10 @@ impl MemberList {
         share_rumor
     }
 
+    // TODO (CM): Rewrite health_of in terms of health_of_by_id, SINCE
+    // THEY'RE EXACTLY THE SAME.
+    //
+    // Also, are both of these actually used?
     /// Returns the health of the member, if the member exists.
     pub fn health_of(&self, member: &Member) -> Option<Health> {
         match self.health.read().expect("Health lock is poisoned").get(
@@ -431,6 +445,8 @@ impl MemberList {
         }
     }
 
+    // TODO (CM): Rewrite check_health_of in terms of
+    // check_health_of_by_id SINCE THEY'RE EXACTLY THE SAME.
     /// Returns true if the members health is the same as `health`. False otherwise.
     pub fn check_health_of(&self, member: &Member, health: Health) -> bool {
         match self.health.read().expect("Health lock is poisoned").get(

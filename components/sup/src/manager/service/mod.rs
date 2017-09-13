@@ -468,6 +468,9 @@ impl Service {
             return;
         }
         outputln!(preamble self.service_group, "Initializing");
+
+        // TODO (CM): would rather put this in an 'else' branch to
+        // make it explicit that no init hook == initialized
         self.initialized = true;
         if let Some(ref hook) = self.hooks.init {
             self.initialized = hook.run(

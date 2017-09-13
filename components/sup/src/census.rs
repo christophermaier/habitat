@@ -78,9 +78,15 @@ impl CensusRing {
         service_file_rumors: &RumorStore<ServiceFileRumor>,
     ) {
         self.changed = false;
+        // NOTE (CM): These HAVE to be in this order (member_list
+        // updates depend on service_store updates having been done
+        // first, at least).
+        //
+        // Can we structure things to make this more obvious?
         self.update_from_service_store(service_rumors);
         self.update_from_election_store(election_rumors);
         self.update_from_election_update_store(election_update_rumors);
+
         self.update_from_member_list(member_list);
         self.update_from_service_config(service_config_rumors);
         self.update_from_service_files(service_file_rumors);
@@ -148,14 +154,30 @@ impl CensusRing {
         self.last_election_update_counter = election_update_rumors.get_update_counter();
     }
 
+    // NOTE (CM): OK, so it looks like members can have a totally
+    // blank slate, health-wise, until this gets called.
     fn update_from_member_list(&mut self, member_list: &MemberList) {
         if member_list.get_update_counter() <= self.last_membership_counter {
             return;
         }
         self.changed = true;
         member_list.with_members(|member| {
+            // health_of *can* return None, but never here, since we're
+            // executing this closure while iterating in a context
+            // where we have a read lock on the member list.
             let health = member_list.health_of(&member).unwrap();
+
+
+            // NOTE (CM): How do the census_groups get populated?
+            // (Answer: update_from_service_store)
             for group in self.census_groups.values_mut() {
+                // NOTE (CM): If there is no group we know about that
+                // considers this member to be part of it, then we
+                // could have a census_member with NO health
+                // information.
+                //
+                // Incidentally, this would also result in members
+                // where persistent=false, which we're also seeing.
                 if let Some(census_member) = group.find_member_mut(member.get_id()) {
                     census_member.update_from_member(&member);
                     census_member.update_from_health(health);
@@ -352,17 +374,45 @@ impl CensusGroup {
         }
     }
 
+    // NOTE (CM): here we set alive to something that could
+    // POTENTIALLY be false.
+    // This has to be where the problem is... it's the only place we
+    // set alive outside of update_from_health.
     fn update_from_service_rumors(&mut self, rumors: &HashMap<String, ServiceRumor>) {
         for (member_id, service_rumor) in rumors.iter() {
+
+
+
             // Yeah - we are ourself - we're alive.
+            // NOTE (CM): BUT ARE WE REALLY?!
+
+
             let is_self = member_id == &self.local_member_id;
+
+
             let mut member = self.population
                 .entry(member_id.to_string())
                 .or_insert_with(|| {
+
+                    // NOTE (CM): the default for a CensusMember has
+                    // ALL FLAGS FALSE
                     let mut new_member = CensusMember::default();
+
+                    // NOTE (CM): What would cause is_self to be
+                    // false? We're clearly assuming that it's true here.
+                    // Why would we set everything to be false if
+                    // we're dealing with a rumor about anyone but ourself?
                     new_member.alive = is_self;
                     new_member
                 });
+
+            // OK, so if the rumor is about ourself, we know that
+            // we're alive, because we're processing
+            // things. Otherwise, we have to assume a blank
+            // slate... let's see how we update from an individual rumor
+            //
+            // Um... OK, that does nothing about updating the member's
+            // health. It's completely unknown. WTF.
             member.update_from_service_rumor(&self.service_group, service_rumor);
         }
     }
@@ -471,6 +521,12 @@ pub struct CensusMember {
     pub service: String,
     pub group: String,
     pub org: Option<String>,
+    // TODO (CM): Does this need to be public?
+    // ALSO WHAT DOES THIS EVEN MEAN? It gets set to true for every
+    // member we update from the list! We don't set it to false
+    // anywhere (in here, at least).
+    //
+    // ALSO: I can remove it and everything still compiles.
     pub persistent: bool,
     pub leader: bool,
     pub follower: bool,

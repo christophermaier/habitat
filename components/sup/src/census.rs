@@ -83,11 +83,16 @@ impl CensusRing {
         // first, at least).
         //
         // Can we structure things to make this more obvious?
-        self.update_from_service_store(service_rumors);
+
+        // This will add new census groups to our state, and also fill
+        // them with members. This is how members get into the groups,
+        // but their health is unknown (effectively null) at this
+        // point.
+        self.update_from_service_store(service_rumors, member_list);
         self.update_from_election_store(election_rumors);
         self.update_from_election_update_store(election_update_rumors);
 
-        self.update_from_member_list(member_list);
+        // self.update_from_member_list(member_list);
         self.update_from_service_config(service_config_rumors);
         self.update_from_service_files(service_file_rumors);
     }
@@ -100,22 +105,64 @@ impl CensusRing {
         self.census_groups.values().map(|cg| cg).collect()
     }
 
-    fn update_from_service_store(&mut self, service_rumors: &RumorStore<ServiceRumor>) {
-        if service_rumors.get_update_counter() <= self.last_service_counter {
+    /// Populates the census from `ServiceRumor`s and Butterfly-level
+    /// membership lists.
+    ///
+    /// (Butterfly provides the health, the ServiceRumors provide the
+    /// rest).
+    fn update_from_service_store(
+        &mut self,
+        service_rumors: &RumorStore<ServiceRumor>,
+        member_list: &MemberList,
+    ) {
+
+        // We are drawing on information from two different sources
+        // which can change independently. If either have changed
+        // since the last we saw them, we need to re-examine our
+        // census.
+        // TODO (CM): Double-check this boolean logic... would it be
+        // easier to say "if either has changed, go forward with
+        // processing?" I think it might.
+        if (service_rumors.get_update_counter() <= self.last_service_counter) &&
+            (member_list.get_update_counter() <= self.last_membership_counter)
+        {
             return;
         }
         self.changed = true;
+
+        // Populate our census; new groups are created here, as are
+        // new members of those groups.
+        //
+        // NOTE: In the current implementation, these members have an
+        // indeterminate health status until we process the contents
+        // of `member_list`. In the future, it would be nice to
+        // incorporate the member list into
+        // `census_group.update_from_service_rumors`, where new census
+        // members are created, so there would be no time that there
+        // is an indeterminate health anywhere.
         service_rumors.with_keys(|(service_group, rumors)| if let Ok(sg) =
             service_group_from_str(service_group)
         {
-            let mut census_group = self.census_groups.entry(sg.clone()).or_insert(
-                CensusGroup::new(
-                    sg,
-                    &self.local_member_id,
-                ),
-            );
+            let mut census_group =
+                self.census_groups.entry(sg.clone()).or_insert(
+                    CensusGroup::new(sg, &self.local_member_id),
+                );
             census_group.update_from_service_rumors(rumors);
         });
+
+        // NOTE (CM): former content of update_from_member_list
+        member_list.with_members(|member| {
+            let health = member_list.health_of(&member).unwrap();
+            for group in self.census_groups.values_mut() {
+                if let Some(census_member) = group.find_member_mut(member.get_id()) {
+                    census_member.update_from_member(&member);
+                    census_member.update_from_health(health);
+                }
+            }
+        });
+
+        // Update our counters to reflect current state.
+        self.last_membership_counter = member_list.get_update_counter();
         self.last_service_counter = service_rumors.get_update_counter();
     }
 

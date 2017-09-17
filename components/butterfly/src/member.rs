@@ -328,6 +328,7 @@ impl MemberList {
                     stop_departure = true;
                 }
             } else {
+                // NOTE (CM): So this is when the incarnations are equal??
                 // We know we have a health if we have a record
                 let hl = self.health.read().expect("Health lock is poisoned");
                 let current_health = hl.get(current_member.get_id()).expect(

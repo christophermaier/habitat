@@ -482,6 +482,8 @@ impl Manager {
             self.update_running_services_from_watcher()?;
             self.check_for_updated_packages();
             self.restart_elections();
+
+            // THIS IS THE ONLY PLACE THIS GETS CALLED
             self.census_ring.update_from_rumors(
                 &self.butterfly.service_store,
                 &self.butterfly.election_store,

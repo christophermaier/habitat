@@ -38,6 +38,10 @@ type MemberId = String;
 
 #[derive(Debug, Serialize)]
 pub struct CensusRing {
+    // TODO (CM): Hrmm... where is this accessed? I think I'd rather
+    // have all the update functions return a boolean, then store that
+    // result in a *private* member, which is then exposed read-only
+    // from a function in `impl CensusRing`.
     pub changed: bool,
 
     census_groups: HashMap<ServiceGroup, CensusGroup>,
@@ -78,10 +82,7 @@ impl CensusRing {
         service_file_rumors: &RumorStore<ServiceFileRumor>,
     ) {
         self.changed = false;
-        // NOTE (CM): These HAVE to be in this order (member_list
-        // updates depend on service_store updates having been done
-        // first, at least).
-        //
+        // NOTE (CM): These HAVE to be in this order.
         // Can we structure things to make this more obvious?
 
         // This will add new census groups to our state, and also fill
@@ -110,6 +111,7 @@ impl CensusRing {
     ///
     /// (Butterfly provides the health, the ServiceRumors provide the
     /// rest).
+    // TODO (CM): NEEDS RENAMING
     fn update_from_service_store(
         &mut self,
         service_rumors: &RumorStore<ServiceRumor>,
@@ -128,6 +130,8 @@ impl CensusRing {
         {
             return;
         }
+
+        // TODO: Return a boolean instead
         self.changed = true;
 
         // Populate our census; new groups are created here, as are
@@ -145,6 +149,8 @@ impl CensusRing {
         {
             let mut census_group =
                 self.census_groups.entry(sg.clone()).or_insert(
+                    // TODO (CM): Why does each census group need the
+                    // local member ID?
                     CensusGroup::new(sg, &self.local_member_id),
                 );
             census_group.update_from_service_rumors(rumors);
@@ -203,20 +209,47 @@ impl CensusRing {
 
     // NOTE (CM): OK, so it looks like members can have a totally
     // blank slate, health-wise, until this gets called.
+    // NOTE (CM): MemberList is from Butterfly!
+
+    // What are the scenarios where we can end up with member with
+    // indeterminate health?
     fn update_from_member_list(&mut self, member_list: &MemberList) {
+        // If the incarnation counter of the membership list isn't
+        // greater, we can exit. Can this happen with new members in
+        // our local census group populations? This is the only place
+        // when last_membership_counter gets incremented.
+        //
+        // So... if there were no changes to the member list, it
+        // wouldn't have updated its counter. But we (the census)
+        // could have previously updated our memberships, right? And
+        // those have no connection to each other... How does the
+        // member_list get updated? How does the census get updated?
+        // Can these be connected?
+        //
+        // Hypothetical scenario: lots of member rumors come in, such
+        // that we fill up the Butterfly member list quickly. Then
+        // later on, we get some service rumors. Those create *census*
+        // members, but we've already gotten all the butterfly rumors
+        // we're going to get, so we don't update health.
         if member_list.get_update_counter() <= self.last_membership_counter {
             return;
         }
+
         self.changed = true;
+
+        // If the member list does not have in it a member of a census
+        // group, then that member in the census group could retain an
+        // indeterminate health... how could that happen?
         member_list.with_members(|member| {
             // health_of *can* return None, but never here, since we're
             // executing this closure while iterating in a context
-            // where we have a read lock on the member list.
+            // where we have a read lock on the member list. We should
+            // always have a health for a butterfly member
+
+            // Also, this is from butterfly (I think?), and those data
+            // are good (in Dave's bug)
             let health = member_list.health_of(&member).unwrap();
 
-
-            // NOTE (CM): How do the census_groups get populated?
-            // (Answer: update_from_service_store)
             for group in self.census_groups.values_mut() {
                 // NOTE (CM): If there is no group we know about that
                 // considers this member to be part of it, then we
@@ -421,47 +454,42 @@ impl CensusGroup {
         }
     }
 
-    // NOTE (CM): here we set alive to something that could
-    // POTENTIALLY be false.
-    // This has to be where the problem is... it's the only place we
-    // set alive outside of update_from_health.
+    /// Adds members to the population of the census group and records
+    /// information about what service they're running.
+    // TODO (CM): Consider renaming this to reflect the fact that this
+    // is where we find out about members?
+    //
+    // Rename this to reflect that this is where the census gets populated
     fn update_from_service_rumors(&mut self, rumors: &HashMap<String, ServiceRumor>) {
         for (member_id, service_rumor) in rumors.iter() {
-
-
-
-            // Yeah - we are ourself - we're alive.
-            // NOTE (CM): BUT ARE WE REALLY?!
-
-
+            // If this is the first time we're seeing this member, add
+            // it to our current population. If the member happens to
+            // be ourself (??), go ahead and explicitly mark it as
+            // "alive", because we have to be alive if we're running
+            // this code, right?
             let is_self = member_id == &self.local_member_id;
-
-
             let mut member = self.population
                 .entry(member_id.to_string())
                 .or_insert_with(|| {
-
-                    // NOTE (CM): the default for a CensusMember has
-                    // ALL FLAGS FALSE
+                    // NOTE: the default for a CensusMember has
+                    // all liveness flags set to false. So all
+                    // non-self members will initially start out being
+                    // neither alive, confirmed, suspect, nor
+                    // departed. Makes me think we need some
+                    // additional "null" state for better
+                    // reasonability on this point.
+                    //
+                    // The More You Know ==*
                     let mut new_member = CensusMember::default();
-
-                    // NOTE (CM): What would cause is_self to be
-                    // false? We're clearly assuming that it's true here.
-                    // Why would we set everything to be false if
-                    // we're dealing with a rumor about anyone but ourself?
                     new_member.alive = is_self;
                     new_member
                 });
-
-            // OK, so if the rumor is about ourself, we know that
-            // we're alive, because we're processing
-            // things. Otherwise, we have to assume a blank
-            // slate... let's see how we update from an individual rumor
-            //
-            // Um... OK, that does nothing about updating the member's
-            // health. It's completely unknown. WTF.
             member.update_from_service_rumor(&self.service_group, service_rumor);
         }
+        // update_from_service_rumor does not change the health of a
+        // newly-inserted member, meaning that at this point, all
+        // newly-added members are in an indeterminate limbo with
+        // respect to their health status.
     }
 
     fn update_from_election_rumor(&mut self, election: &ElectionRumor) {
@@ -602,6 +630,7 @@ impl CensusMember {
         self.member_id = String::from(rumor.get_member_id());
         self.service = sg.service().to_string();
         self.group = sg.group().to_string();
+        // self.org = sg.org().map(|o| o.to_string());
         if let Some(org) = sg.org() {
             self.org = Some(org.to_string());
         }

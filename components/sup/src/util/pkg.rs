@@ -81,37 +81,6 @@ pub fn install_v2(
     Ok(PackageInstall::load(&installed_ident, Some(&fs_root_path))?)
 }
 
-pub fn maybe_install_newer(
-    ui: &mut UI,
-    spec: &ServiceSpec,
-    current: PackageInstall,
-) -> Result<PackageInstall> {
-    let latest_ident: PackageIdent = {
-        let depot_client = Client::new(&spec.bldr_url, PRODUCT, VERSION, None)?;
-        match depot_client.show_package(&spec.ident, Some(&spec.channel)) {
-            Ok(pkg) => pkg.get_ident().clone().into(),
-            Err(_) => return Ok(current),
-        }
-    };
-
-    if &latest_ident > current.ident() {
-        outputln!(
-            "Newer version of {} detected. Installing {} from {}",
-            spec.ident,
-            latest_ident,
-            spec.bldr_url
-        );
-        self::install(ui, &spec.bldr_url, &latest_ident, Some(&spec.channel))
-    } else {
-        outputln!(
-            "Confirmed latest version of {} is {}",
-            spec.ident,
-            current.ident()
-        );
-        Ok(current)
-    }
-}
-
 pub fn install_from_spec(ui: &mut UI, spec: &ServiceSpec) -> Result<PackageInstall> {
     Ok(install(
         ui,

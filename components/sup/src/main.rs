@@ -530,22 +530,22 @@ fn sub_start(m: &ArgMatches, launcher: LauncherCli) -> Result<()> {
         hcore::output::set_no_color(true);
     }
     let cfg = mgrcfg_from_matches(m)?;
-    let mut maybe_local_artifact: Option<&str> = None;
+
     // PKG_IDENT_OR_ARTIFACT is required, so unwrap() is safe here
     let ident_or_artifact = m.value_of("PKG_IDENT_OR_ARTIFACT").unwrap();
-
     let ident = if Path::new(ident_or_artifact).is_file() {
-        maybe_local_artifact = Some(ident_or_artifact);
         PackageArchive::new(Path::new(ident_or_artifact)).ident()?
     } else {
         PackageIdent::from_str(ident_or_artifact)?
     };
 
-    let default_spec = ServiceSpec::default_for(ident);
-    let spec_file = Manager::spec_path_for(&cfg, &default_spec);
-
-    let spec = match ServiceSpec::from_file(&spec_file) {
-        Ok(mut spec) => {
+    // NOTE: As coded, if you try to start a service from a hart file,
+    // but you already have a spec for that service (regardless of
+    // version), you're not going to ever install your hart file, and
+    // the spec isn't going to be updated to point to that exact
+    // version.
+    let spec = match existing_spec_for_ident(&cfg, ident.clone()) {
+        Some(mut spec) => {
             if spec.desired_state == DesiredState::Down {
                 spec.desired_state = DesiredState::Up;
                 spec
@@ -558,14 +558,23 @@ fn sub_start(m: &ArgMatches, launcher: LauncherCli) -> Result<()> {
                 }
             }
         }
-        Err(_) => {
-            let spec = spec_from_matches(default_spec.ident, m)?;
-            util::pkg::install_from_spec(&mut UI::default(), &spec)?;
-            spec
+        None => {
+            let depot_url = bldr_url_from_matches(m);
+            let channel = channel_from_matches(m);
+            util::pkg::install_v2(&mut UI::default(), &depot_url, &ident_or_artifact, &channel)?;
+
+            // Note that this spec will be for a fully-qualified
+            // identifier if starting from a hart file (IOW, it's
+            // never going to update, regardless of what you've set it
+            // to do).
+            //
+            // Because of this, we should install from `ident`, rather
+            // than the PackageInstall that comes back from installing
+            // the package, because that will *always* be a
+            // fully-qualified identifier.
+            spec_from_matches(ident, m)?
         }
     };
-
-
 
     Manager::save_spec_for(&cfg, &spec)?;
 
@@ -581,6 +590,19 @@ fn sub_start(m: &ArgMatches, launcher: LauncherCli) -> Result<()> {
     }
 
     Ok(())
+}
+
+// Given a package identifier, return the ServiceSpec for that
+// package, if it already exists in this supervisor.
+//
+// TODO (CM): passing ownership of the PackageIdent here is gross, and
+// we shouldn't need it... we're ultimately just trying to generate a
+// file path from data in that file. Once we stop using
+// `ServiceSpec::default_for()`, we can pass a reference here instead.
+fn existing_spec_for_ident(cfg: &ManagerConfig, ident: PackageIdent) -> Option<ServiceSpec> {
+    let default_spec = ServiceSpec::default_for(ident);
+    let spec_file = Manager::spec_path_for(cfg, &default_spec);
+    ServiceSpec::from_file(&spec_file).ok()
 }
 
 fn sub_status(m: &ArgMatches) -> Result<()> {
@@ -743,6 +765,24 @@ fn mgrcfg_from_matches(m: &ArgMatches) -> Result<ManagerConfig> {
     Ok(cfg)
 }
 
+// Resolve a depot URL. Taken from the environment or from CLI args,
+// if given.
+fn bldr_url_from_matches(matches: &ArgMatches) -> String {
+    matches
+        .value_of("DEPOT_URL")
+        .unwrap_or(&default_bldr_url())
+        .to_string()
+}
+
+// Resolve a channel. Taken from the environment or from CLI args, if
+// given.
+fn channel_from_matches(matches: &ArgMatches) -> String {
+    matches
+        .value_of("CHANNEL")
+        .and_then(|c| Some(c.to_string()))
+        .unwrap_or(channel::default())
+}
+
 fn spec_from_matches(ident: PackageIdent, m: &ArgMatches) -> Result<ServiceSpec> {
     let mut spec = ServiceSpec::default_for(ident);
     if let Some(group) = m.value_of("GROUP") {
@@ -754,13 +794,8 @@ fn spec_from_matches(ident: PackageIdent, m: &ArgMatches) -> Result<ServiceSpec>
             env.to_string(),
         )?);
     }
-    let env_or_default = default_bldr_url();
-    spec.bldr_url = m.value_of("BLDR_URL")
-        .unwrap_or(&env_or_default)
-        .to_string();
-    spec.channel = m.value_of("CHANNEL")
-        .and_then(|c| Some(c.to_string()))
-        .unwrap_or(channel::default());
+    spec.bldr_url = bldr_url_from_matches(m);
+    spec.channel = channel_from_matches(m);
     if let Some(topology) = m.value_of("TOPOLOGY") {
         spec.topology = Topology::from_str(topology)?;
     }

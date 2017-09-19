@@ -81,25 +81,10 @@ pub fn maybe_install_newer(
 }
 
 pub fn install_from_spec(ui: &mut UI, spec: &ServiceSpec) -> Result<PackageInstall> {
-    match PackageInstall::load(&spec.ident, Some(&Path::new(&*FS_ROOT_PATH))) {
-        Ok(package) => {
-            match spec.update_strategy {
-                UpdateStrategy::AtOnce => Ok(maybe_install_newer(ui, spec, package)?),
-                UpdateStrategy::None | UpdateStrategy::Rolling => Ok(package),
-            }
-        }
-        Err(_) => {
-            outputln!(
-                "{} not found in local package cache, installing from {}",
-                Yellow.bold().paint(spec.ident.to_string()),
-                &spec.bldr_url
-            );
-            Ok(install(
-                ui,
-                spec.bldr_url.as_str(),
-                &spec.ident,
-                Some(&spec.channel),
-            )?)
-        }
-    }
+    Ok(install(
+        ui,
+        spec.bldr_url.as_str(),
+        &spec.ident,
+        Some(&spec.channel),
+    )?)
 }

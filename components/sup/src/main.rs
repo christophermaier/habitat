@@ -763,7 +763,7 @@ fn mgrcfg_from_matches(m: &ArgMatches) -> Result<ManagerConfig> {
 // Resolve a Builder URL. Taken from the environment or from CLI args,
 // if given.
 fn bldr_url_from_matches(matches: &ArgMatches) -> String {
-    match m.value_of("BLDR_URL") {
+    match matches.value_of("BLDR_URL") {
         Some(url) => url.to_string(),
         None => default_bldr_url(),
     }

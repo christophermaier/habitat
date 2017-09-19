@@ -295,8 +295,7 @@ fn sub_origin_key_upload(ui: &mut UI, m: &ArgMatches) -> Result<()> {
 
 fn sub_pkg_binlink(ui: &mut UI, m: &ArgMatches) -> Result<()> {
     let ident = PackageIdent::from_str(m.value_of("PKG_IDENT").unwrap())?;
-    let env_or_default = default_binlink_dir();
-    let dest_dir = Path::new(m.value_of("DEST_DIR").unwrap_or(&env_or_default));
+    let dest_dir = dest_dir_from_matches(m);
     let force = m.is_present("FORCE");
     match m.value_of("BINARY") {
         Some(binary) => {
@@ -436,12 +435,34 @@ fn sub_plan_init(ui: &mut UI, m: &ArgMatches) -> Result<()> {
     )
 }
 
-fn sub_pkg_install(ui: &mut UI, m: &ArgMatches) -> Result<()> {
-    let env_or_default = default_bldr_url();
-    let url = m.value_of("BLDR_URL").unwrap_or(&env_or_default);
-    let channel = m.value_of("CHANNEL")
+// TODO (CM): Copied from hab_sup::main... find a way to share?
+// Resolve a Builder URL. Taken from the environment or from CLI args,
+// if given.
+fn bldr_url_from_matches(matches: &ArgMatches) -> String {
+    match matches.value_of("BLDR_URL") {
+        Some(url) => url.to_string(),
+        None => default_bldr_url(),
+    }
+}
+
+// TODO (CM): Copied from hab_sup::main... find a way to share?
+// Resolve a channel. Taken from the environment or from CLI args, if
+// given.
+fn channel_from_matches(matches: &ArgMatches) -> String {
+    matches
+        .value_of("CHANNEL")
         .and_then(|c| Some(c.to_string()))
-        .unwrap_or(channel::default());
+        .unwrap_or(channel::default())
+}
+
+fn dest_dir_from_matches(matches: &ArgMatches) -> PathBuf {
+    let env_or_default = default_binlink_dir();
+    Path::new(matches.value_of("DEST_DIR").unwrap_or(&env_or_default)).to_path_buf()
+}
+
+fn sub_pkg_install(ui: &mut UI, m: &ArgMatches) -> Result<()> {
+    let url = bldr_url_from_matches(m);
+    let channel = channel_from_matches(m);
     let ident_or_artifacts = m.values_of("PKG_IDENT_OR_ARTIFACT").unwrap(); // Required via clap
     let ignore_target = m.is_present("IGNORE_TARGET");
     init();
@@ -449,7 +470,7 @@ fn sub_pkg_install(ui: &mut UI, m: &ArgMatches) -> Result<()> {
     for ident_or_artifact in ident_or_artifacts {
         let pkg_ident = common::command::package::install::start(
             ui,
-            url,
+            &url,
             Some(&channel),
             ident_or_artifact,
             PRODUCT,
@@ -458,9 +479,9 @@ fn sub_pkg_install(ui: &mut UI, m: &ArgMatches) -> Result<()> {
             &cache_artifact_path(Some(&*FS_ROOT)),
             ignore_target,
         )?;
+
         if m.is_present("BINLINK") {
-            let env_or_default = default_binlink_dir();
-            let dest_dir = Path::new(m.value_of("DEST_DIR").unwrap_or(&env_or_default));
+            let dest_dir = dest_dir_from_matches(m);
             let force = m.is_present("FORCE");
             command::pkg::binlink::binlink_all_in_pkg(ui, &pkg_ident, &dest_dir, &*FS_ROOT, force)?;
         }

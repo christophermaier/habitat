@@ -443,11 +443,7 @@ fn sub_pkg_install(ui: &mut UI, m: &ArgMatches) -> Result<()> {
         .and_then(|c| Some(c.to_string()))
         .unwrap_or(channel::default());
     let ident_or_artifacts = m.values_of("PKG_IDENT_OR_ARTIFACT").unwrap(); // Required via clap
-    let ignore_target = if m.is_present("IGNORE_TARGET") {
-        true
-    } else {
-        false
-    };
+    let ignore_target = m.is_present("IGNORE_TARGET");
     init();
 
     for ident_or_artifact in ident_or_artifacts {

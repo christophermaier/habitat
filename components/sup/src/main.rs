@@ -671,13 +671,8 @@ fn mgrcfg_from_matches(m: &ArgMatches) -> Result<ManagerConfig> {
     let mut cfg = ManagerConfig::default();
 
     cfg.auto_update = m.is_present("AUTO_UPDATE");
-    cfg.update_url = match m.value_of("BLDR_URL") {
-        Some(url) => url.to_string(),
-        None => default_bldr_url(),
-    };
-    cfg.update_channel = m.value_of("CHANNEL")
-        .and_then(|c| Some(c.to_string()))
-        .unwrap_or(channel::default());
+    cfg.update_url = bldr_url_from_matches(m);
+    cfg.update_channel = channel_from_matches(m);
     if let Some(addr_str) = m.value_of("LISTEN_GOSSIP") {
         cfg.gossip_listen = GossipListenAddr::from_str(addr_str)?;
     }
@@ -765,13 +760,13 @@ fn mgrcfg_from_matches(m: &ArgMatches) -> Result<ManagerConfig> {
     Ok(cfg)
 }
 
-// Resolve a depot URL. Taken from the environment or from CLI args,
+// Resolve a Builder URL. Taken from the environment or from CLI args,
 // if given.
 fn bldr_url_from_matches(matches: &ArgMatches) -> String {
-    matches
-        .value_of("DEPOT_URL")
-        .unwrap_or(&default_bldr_url())
-        .to_string()
+    match m.value_of("BLDR_URL") {
+        Some(url) => url.to_string(),
+        None => default_bldr_url(),
+    }
 }
 
 // Resolve a channel. Taken from the environment or from CLI args, if

@@ -484,7 +484,7 @@ fn sub_load(m: &ArgMatches) -> Result<()> {
     spec.start_style = StartStyle::Persistent;
     util::pkg::install_from_spec(&mut UI::default(), &spec)?;
 
-    Manager::save_spec_for(&cfg, spec.clone())?;
+    Manager::save_spec_for(&cfg, &spec)?;
     outputln!("The {} service was successfully loaded", spec.ident);
     Ok(())
 }
@@ -632,7 +632,7 @@ fn sub_stop(m: &ArgMatches) -> Result<()> {
     let spec_file = Manager::spec_path_for(&cfg, &ServiceSpec::default_for(ident));
     let mut spec = ServiceSpec::from_file(&spec_file)?;
     spec.desired_state = DesiredState::Down;
-    Manager::save_spec_for(&cfg, spec)
+    Manager::save_spec_for(&cfg, &spec)
 }
 
 fn sub_term(m: &ArgMatches) -> Result<()> {

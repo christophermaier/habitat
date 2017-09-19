@@ -93,7 +93,7 @@ pub fn run(
                 false,
             )?;
         }
-        Manager::save_spec_for(&cfg, spec)?;
+        Manager::save_spec_for(&cfg, &spec)?;
     }
     if !Manager::is_running(&cfg)? {
         let mut manager = Manager::load(cfg, launcher)?;

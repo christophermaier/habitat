@@ -565,22 +565,23 @@ fn sub_start(m: &ArgMatches, launcher: LauncherCli) -> Result<()> {
         None => None,
     };
 
-    let running = Manager::is_running(&cfg)?;
-    command::start::run(
-        cfg.clone(),
-        launcher,
-        maybe_spec.clone(),
-        maybe_local_artifact,
-    )?;
 
-    if running {
+    if let Some(ref spec) = maybe_spec {
+        Manager::save_spec_for(&cfg, spec)?;
+    }
+
+    if Manager::is_running(&cfg)? {
         if let Some(spec) = maybe_spec {
             outputln!(
                 "Supervisor starting {}. See the Supervisor output for more details.",
                 spec.ident
             );
         }
+    } else {
+        let mut manager = Manager::load(cfg, launcher)?;
+        manager.run()?
     }
+
     Ok(())
 }
 

@@ -531,52 +531,50 @@ fn sub_start(m: &ArgMatches, launcher: LauncherCli) -> Result<()> {
     }
     let cfg = mgrcfg_from_matches(m)?;
     let mut maybe_local_artifact: Option<&str> = None;
-    let maybe_spec = match m.value_of("PKG_IDENT_OR_ARTIFACT") {
-        Some(ident_or_artifact) => {
-            let ident = if Path::new(ident_or_artifact).is_file() {
-                maybe_local_artifact = Some(ident_or_artifact);
-                PackageArchive::new(Path::new(ident_or_artifact)).ident()?
+    // PKG_IDENT_OR_ARTIFACT is required, so unwrap() is safe here
+    let ident_or_artifact = m.value_of("PKG_IDENT_OR_ARTIFACT").unwrap();
+
+    let ident = if Path::new(ident_or_artifact).is_file() {
+        maybe_local_artifact = Some(ident_or_artifact);
+        PackageArchive::new(Path::new(ident_or_artifact)).ident()?
+    } else {
+        PackageIdent::from_str(ident_or_artifact)?
+    };
+
+    let default_spec = ServiceSpec::default_for(ident);
+    let spec_file = Manager::spec_path_for(&cfg, &default_spec);
+
+    let spec = match ServiceSpec::from_file(&spec_file) {
+        Ok(mut spec) => {
+            if spec.desired_state == DesiredState::Down {
+                spec.desired_state = DesiredState::Up;
+                spec
             } else {
-                PackageIdent::from_str(ident_or_artifact)?
-            };
-            let default_spec = ServiceSpec::default_for(ident);
-            let spec_file = Manager::spec_path_for(&cfg, &default_spec);
-            match ServiceSpec::from_file(&spec_file) {
-                Ok(mut spec) => {
-                    if spec.desired_state == DesiredState::Down {
-                        spec.desired_state = DesiredState::Up;
-                        Some(spec)
-                    } else {
-                        if !Manager::is_running(&cfg)? {
-                            let mut manager = Manager::load(cfg, launcher)?;
-                            return manager.run();
-                        } else {
-                            process::exit(OK_NO_RETRY_EXCODE);
-                        }
-                    }
-                }
-                Err(_) => {
-                    let spec = spec_from_matches(default_spec.ident, m)?;
-                    util::pkg::install_from_spec(&mut UI::default(), &spec)?;
-                    Some(spec)
+                if !Manager::is_running(&cfg)? {
+                    let mut manager = Manager::load(cfg, launcher)?;
+                    return manager.run();
+                } else {
+                    process::exit(OK_NO_RETRY_EXCODE);
                 }
             }
         }
-        None => None,
+        Err(_) => {
+            let spec = spec_from_matches(default_spec.ident, m)?;
+            util::pkg::install_from_spec(&mut UI::default(), &spec)?;
+            spec
+        }
     };
 
 
-    if let Some(ref spec) = maybe_spec {
-        Manager::save_spec_for(&cfg, spec)?;
-    }
+
+    Manager::save_spec_for(&cfg, &spec)?;
+
 
     if Manager::is_running(&cfg)? {
-        if let Some(spec) = maybe_spec {
-            outputln!(
-                "Supervisor starting {}. See the Supervisor output for more details.",
-                spec.ident
-            );
-        }
+        outputln!(
+            "Supervisor starting {}. See the Supervisor output for more details.",
+            spec.ident
+        );
     } else {
         let mut manager = Manager::load(cfg, launcher)?;
         manager.run()?

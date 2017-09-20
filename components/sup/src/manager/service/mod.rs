@@ -34,6 +34,7 @@ use ansi_term::Colour::{Yellow, Red, Green};
 use butterfly::rumor::service::Service as ServiceRumor;
 use common::ui::UI;
 use hcore::crypto::hash;
+use hcore::fs::FS_ROOT_PATH;
 use hcore::package::{PackageIdent, PackageInstall};
 use hcore::service::ServiceGroup;
 use hcore::util::deserialize_using_from_str;
@@ -174,7 +175,10 @@ impl Service {
         manager_fs_cfg: Arc<manager::FsCfg>,
         organization: Option<&str>,
     ) -> Result<Service> {
-        let package = util::pkg::install_from_spec(&mut UI::default(), &spec)?;
+        // The package for a spec should already be installed.
+        // TODO (CM): Consolidate all this path mess
+        let fs_root_path = Path::new(&*FS_ROOT_PATH);
+        let package = PackageInstall::load(&spec.ident, Some(fs_root_path))?;
         Ok(Self::new(sys, package, spec, manager_fs_cfg, organization)?)
     }
 

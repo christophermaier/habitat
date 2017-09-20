@@ -15,7 +15,6 @@
 use std::collections::HashMap;
 use std::sync::mpsc::{sync_channel, Receiver, SyncSender, TryRecvError};
 use std::thread;
-use std::time::Duration;
 
 use butterfly;
 use common::ui::{Coloring, UI};
@@ -24,10 +23,10 @@ use env;
 use hcore::package::{PackageIdent, PackageInstall};
 use hcore::service::ServiceGroup;
 use launcher_client::LauncherCli;
-use time::{SteadyTime, Duration as TimeDuration};
 
 use {PRODUCT, VERSION};
 use census::CensusRing;
+use manager::periodic::Periodic;
 use manager::service::{Service, Topology, UpdateStrategy};
 use util;
 
@@ -298,6 +297,31 @@ struct Worker {
     ui: UI,
 }
 
+impl Periodic for Worker {
+    // TODO (CM): Consider performing this check once and storing it,
+    // instead of re-checking every time.
+    fn update_period(&self) -> i64 {
+        match env::var(FREQUENCY_ENVVAR) {
+            Ok(val) => {
+                match val.parse::<i64>() {
+                    Ok(num) => num,
+                    Err(_) => {
+                        outputln!(
+                            "Unable to parse '{}' from {} as a valid integer. Falling back \
+                             to default {} MS frequency.",
+                            val,
+                            FREQUENCY_ENVVAR,
+                            DEFAULT_FREQUENCY
+                        );
+                        DEFAULT_FREQUENCY
+                    }
+                }
+            }
+            Err(_) => DEFAULT_FREQUENCY,
+        }
+    }
+}
+
 impl Worker {
     fn new(service: &Service) -> Self {
         Worker {
@@ -330,7 +354,7 @@ impl Worker {
     fn run_once(&mut self, sender: SyncSender<PackageInstall>, ident: PackageIdent) {
         outputln!("Updating from {} to {}", self.current, ident);
         loop {
-            let next_check = self.next_check_time();
+            let next_time = self.next_period_start();
 
             match util::pkg::install(
                 &mut self.ui,
@@ -346,13 +370,13 @@ impl Worker {
                 Err(e) => warn!("Failed to install updated package: {:?}", e),
             }
 
-            Worker::sleep_until(next_check);
+            self.sleep_until(next_time);
         }
     }
 
     fn run_poll(&mut self, sender: SyncSender<PackageInstall>) {
         loop {
-            let next_check = self.next_check_time();
+            let next_time = self.next_period_start();
 
             match util::pkg::install(
                 &mut self.ui,
@@ -379,43 +403,8 @@ impl Worker {
                 }
                 Err(e) => warn!("Updater failed to get latest package: {:?}", e),
             }
-            Worker::sleep_until(next_check);
-        }
-    }
 
-    /// When is the next time we should poll for an update, given that
-    /// we're going to check right now?
-    fn next_check_time(&self) -> SteadyTime {
-        SteadyTime::now() + TimeDuration::milliseconds(self.update_frequency())
-    }
-
-    /// Given the next time we should poll for an update, sleep as
-    /// long as we need to until that time.
-    fn sleep_until(next_check_time: SteadyTime) {
-        let time_to_wait = (next_check_time - SteadyTime::now()).num_milliseconds();
-        if time_to_wait > 0 {
-            thread::sleep(Duration::from_millis(time_to_wait as u64));
-        }
-    }
-
-    fn update_frequency(&self) -> i64 {
-        match env::var(FREQUENCY_ENVVAR) {
-            Ok(val) => {
-                match val.parse::<i64>() {
-                    Ok(num) => num,
-                    Err(_) => {
-                        outputln!(
-                            "Unable to parse '{}' from {} as a valid integer. Falling back \
-                                  to default {} MS frequency.",
-                            val,
-                            FREQUENCY_ENVVAR,
-                            DEFAULT_FREQUENCY
-                        );
-                        DEFAULT_FREQUENCY
-                    }
-                }
-            }
-            Err(_) => DEFAULT_FREQUENCY,
+            self.sleep_until(next_time);
         }
     }
 }

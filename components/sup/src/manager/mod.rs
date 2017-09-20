@@ -14,6 +14,7 @@
 
 pub mod service;
 mod events;
+mod periodic;
 mod self_updater;
 mod service_updater;
 mod spec_watcher;

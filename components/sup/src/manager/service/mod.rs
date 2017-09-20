@@ -32,7 +32,6 @@ use std::time::{Duration, Instant};
 
 use ansi_term::Colour::{Yellow, Red, Green};
 use butterfly::rumor::service::Service as ServiceRumor;
-use common::ui::UI;
 use hcore::crypto::hash;
 use hcore::fs::FS_ROOT_PATH;
 use hcore::package::{PackageIdent, PackageInstall};

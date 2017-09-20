@@ -14,40 +14,13 @@
 
 use std::path::Path;
 
-use ansi_term::Colour::Yellow;
 use common;
 use common::ui::UI;
-use depot_client::Client;
 use hcore::fs::{self, FS_ROOT_PATH};
-use hcore::package::{PackageIdent, PackageInstall};
+use hcore::package::PackageInstall;
 
 use {PRODUCT, VERSION};
 use error::Result;
-use manager::ServiceSpec;
-use manager::service::UpdateStrategy;
-
-static LOGKEY: &'static str = "PK";
-
-pub fn install(
-    ui: &mut UI,
-    url: &str,
-    ident: &PackageIdent,
-    channel: Option<&str>,
-) -> Result<PackageInstall> {
-    let fs_root_path = Path::new(&*FS_ROOT_PATH);
-    let installed_ident = common::command::package::install::start(
-        ui,
-        url,
-        channel,
-        &ident.to_string(),
-        PRODUCT,
-        VERSION,
-        fs_root_path,
-        &fs::cache_artifact_path(None::<String>),
-        false,
-    )?;
-    Ok(PackageInstall::load(&installed_ident, Some(&fs_root_path))?)
-}
 
 // TODO (CM): This is a temporary function (halfway through a
 // refactor, at this point!)
@@ -79,13 +52,4 @@ pub fn install_v2(
     // PackageInstall::load, but the error type isn't working out
     // correctly. Look into that!
     Ok(PackageInstall::load(&installed_ident, Some(&fs_root_path))?)
-}
-
-pub fn install_from_spec(ui: &mut UI, spec: &ServiceSpec) -> Result<PackageInstall> {
-    Ok(install(
-        ui,
-        spec.bldr_url.as_str(),
-        &spec.ident,
-        Some(&spec.channel),
-    )?)
 }

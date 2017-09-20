@@ -12,22 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::path::Path;
-use std::str::FromStr;
 use std::sync::mpsc::{sync_channel, Receiver, SyncSender, TryRecvError};
 use std::thread;
 use std::time::Duration;
 
-use common::ui::ProgressBar;
-use depot_client::Client as DepotClient;
-use env;
-use hcore::package::{PackageIdent, PackageInstall};
-use hcore::crypto::default_cache_key_path;
-use hcore::fs::{CACHE_ARTIFACT_PATH, FS_ROOT_PATH};
 use time::{SteadyTime, Duration as TimeDuration};
 
-use {PRODUCT, VERSION};
-use error::Result;
+use common::ui::{Coloring, UI};
+use env;
+use hcore::package::{PackageIdent, PackageInstall};
+use util;
 
 pub const SUP_PKG_IDENT: &'static str = "core/hab-sup";
 const DEFAULT_FREQUENCY: i64 = 60_000;
@@ -57,10 +51,10 @@ impl SelfUpdater {
         update_channel: String,
     ) -> Receiver<PackageInstall> {
         let (tx, rx) = sync_channel(0);
-        let client = DepotClient::new(update_url, PRODUCT, VERSION, None).unwrap();
+        let url = update_url.to_string(); // eww
         thread::Builder::new()
             .name("self-updater".to_string())
-            .spawn(move || Self::run(tx, current, client, update_channel))
+            .spawn(move || Self::run(tx, current, url, update_channel))
             .expect("Unable to start self-updater thread");
         rx
     }
@@ -68,32 +62,36 @@ impl SelfUpdater {
     fn run(
         sender: SyncSender<PackageInstall>,
         current: PackageIdent,
-        depot: DepotClient,
+        builder_url: String,
         channel: String,
     ) {
-        let spec_ident = PackageIdent::from_str(SUP_PKG_IDENT).unwrap();
         debug!("Self updater current package, {}", current);
         loop {
             let next_check = SteadyTime::now() + TimeDuration::milliseconds(update_frequency());
-            match depot.show_package(&spec_ident, Some(&channel)) {
-                Ok(mut remote) => {
-                    debug!("Self updater found remote, {}", remote.get_ident());
-                    let latest: PackageIdent = remote.take_ident().into();
-                    if latest > current {
-                        debug!("Self updater installing newer supervisor, {}", latest);
-                        match install(&depot, &latest, true) {
-                            Ok(package) => {
-                                sender.send(package).unwrap();
-                                break;
-                            }
-                            Err(err) => warn!("Self updater failed to install, {}", err),
-                        }
+
+            match util::pkg::install(
+                &mut UI::default_with(Coloring::Never, None),
+                &builder_url,
+                SUP_PKG_IDENT,
+                &channel,
+            ) {
+                Ok(package) => {
+                    if current < *package.ident() {
+                        debug!(
+                            "Self updater installing newer supervisor, {}",
+                            package.ident()
+                        );
+                        sender.send(package).expect("Main thread has gone away!");
+                        break;
                     } else {
                         debug!("Supervisor package found is not newer than ours");
                     }
                 }
-                Err(err) => warn!("Self updater failed to get latest, {}", err),
+                Err(err) => {
+                    warn!("Self updater failed to get latest, {}", err);
+                }
             }
+
             let time_to_wait = (next_check - SteadyTime::now()).num_milliseconds();
             if time_to_wait > 0 {
                 thread::sleep(Duration::from_millis(time_to_wait as u64));
@@ -119,31 +117,6 @@ impl SelfUpdater {
             self.update_channel.clone(),
         );
     }
-}
-
-fn download(depot: &DepotClient, package: &PackageIdent) -> Result<PackageInstall> {
-    let mut archive = depot.fetch_package(
-        package,
-        &Path::new(&*FS_ROOT_PATH).join(CACHE_ARTIFACT_PATH),
-        None::<ProgressBar>,
-    )?;
-    archive.verify(&default_cache_key_path(None))?;
-    archive.unpack(None)?;
-    let pkg = PackageInstall::load(archive.ident().as_ref().unwrap(), Some(&*FS_ROOT_PATH))?;
-    Ok(pkg)
-}
-
-fn install(depot: &DepotClient, package: &PackageIdent, recurse: bool) -> Result<PackageInstall> {
-    let package = match PackageInstall::load(package, Some(&*FS_ROOT_PATH)) {
-        Ok(pkg) => pkg,
-        Err(_) => download(depot, package)?,
-    };
-    if recurse {
-        for ident in package.tdeps()?.iter() {
-            install(depot, &ident, false)?;
-        }
-    }
-    Ok(package)
 }
 
 fn update_frequency() -> i64 {

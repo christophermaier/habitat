@@ -22,9 +22,7 @@ use hcore::package::PackageInstall;
 use {PRODUCT, VERSION};
 use error::Result;
 
-// TODO (CM): This is a temporary function (halfway through a
-// refactor, at this point!)
-pub fn install_v2(
+pub fn install(
     ui: &mut UI,
     url: &str,
     ident: &str, // TODO (CM): or an enum of PackageIdent, or path

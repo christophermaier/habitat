@@ -483,7 +483,7 @@ fn sub_load(m: &ArgMatches) -> Result<()> {
     let mut spec = spec_from_matches(default_spec.ident, m)?;
     spec.start_style = StartStyle::Persistent;
 
-    util::pkg::install_v2(
+    util::pkg::install(
         &mut UI::default(),
         &spec.depot_url,
         &spec.ident.to_string(),
@@ -567,7 +567,7 @@ fn sub_start(m: &ArgMatches, launcher: LauncherCli) -> Result<()> {
         None => {
             let depot_url = bldr_url_from_matches(m);
             let channel = channel_from_matches(m);
-            util::pkg::install_v2(&mut UI::default(), &depot_url, &ident_or_artifact, &channel)?;
+            util::pkg::install(&mut UI::default(), &depot_url, &ident_or_artifact, &channel)?;
 
             // Note that this spec will be for a fully-qualified
             // identifier if starting from a hart file (IOW, it's

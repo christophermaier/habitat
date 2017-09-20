@@ -482,7 +482,13 @@ fn sub_load(m: &ArgMatches) -> Result<()> {
     }
     let mut spec = spec_from_matches(default_spec.ident, m)?;
     spec.start_style = StartStyle::Persistent;
-    util::pkg::install_from_spec(&mut UI::default(), &spec)?;
+
+    util::pkg::install_v2(
+        &mut UI::default(),
+        &spec.depot_url,
+        &spec.ident.to_string(),
+        &spec.channel,
+    )?;
 
     Manager::save_spec_for(&cfg, &spec)?;
     outputln!("The {} service was successfully loaded", spec.ident);

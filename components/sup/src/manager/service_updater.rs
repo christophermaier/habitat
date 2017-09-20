@@ -13,27 +13,23 @@
 // limitations under the License.
 
 use std::collections::HashMap;
-use std::path::Path;
 use std::sync::mpsc::{sync_channel, Receiver, SyncSender, TryRecvError};
 use std::thread;
 use std::time::Duration;
 
 use butterfly;
-use common::ui::{Coloring, Status, UI};
+use common::ui::{Coloring, UI};
 use depot_client;
 use env;
 use hcore::package::{PackageIdent, PackageInstall};
 use hcore::service::ServiceGroup;
-use hcore::crypto::{artifact, default_cache_key_path, SigKeyPair};
-use hcore::crypto::keys::parse_name_with_rev;
-use hcore::fs::{CACHE_ARTIFACT_PATH, FS_ROOT_PATH};
 use launcher_client::LauncherCli;
 use time::{SteadyTime, Duration as TimeDuration};
 
 use {PRODUCT, VERSION};
-use error::Result;
 use census::CensusRing;
 use manager::service::{Service, Topology, UpdateStrategy};
+use util;
 
 static LOGKEY: &'static str = "SU";
 const FREQUENCY_ENVVAR: &'static str = "HAB_UPDATE_STRATEGY_FREQUENCY_MS";
@@ -112,11 +108,13 @@ impl ServiceUpdater {
                         return true;
                     }
                     Err(TryRecvError::Empty) => return false,
-                    Err(TryRecvError::Disconnected) => {}
+                    Err(TryRecvError::Disconnected) => {
+                        debug!("Service Updater worker has died; restarting...");
+                        *rx = Worker::new(service).start(&service.service_group, None);
+                    }
                 }
-                debug!("Service Updater worker has died; restarting...");
-                *rx = Worker::new(service).start(&service.service_group, None);
             }
+
             Some(&mut UpdaterState::Rolling(ref mut st @ RollingState::AwaitingElection)) => {
                 if let Some(census_group) = census_ring.census_group_for(&service.service_group) {
                     if service.topology == Topology::Leader {
@@ -292,6 +290,8 @@ impl ServiceUpdater {
 struct Worker {
     current: PackageIdent,
     spec_ident: PackageIdent,
+    builder_url: String, // TODO (CM): possibly temporary; depends on
+    // if I keep depot_client as a thing.
     depot: depot_client::Client,
     channel: String,
     update_strategy: UpdateStrategy,
@@ -330,9 +330,14 @@ impl Worker {
     fn run_once(&mut self, sender: SyncSender<PackageInstall>, ident: PackageIdent) {
         outputln!("Updating from {} to {}", self.current, ident);
         loop {
-            let next_check = SteadyTime::now() +
-                TimeDuration::milliseconds(self.update_frequency());
-            match self.install(&ident, true) {
+            let next_check = self.next_check_time();
+
+            match util::pkg::install(
+                &mut self.ui,
+                &self.builder_url,
+                &ident.to_string(), // UGH
+                &self.channel,
+            ) {
                 Ok(package) => {
                     self.current = package.ident().clone();
                     sender.send(package).expect("Main thread has gone away!");
@@ -340,103 +345,57 @@ impl Worker {
                 }
                 Err(e) => warn!("Failed to install updated package: {:?}", e),
             }
-            let time_to_wait = (next_check - SteadyTime::now()).num_milliseconds();
-            if time_to_wait > 0 {
-                thread::sleep(Duration::from_millis(time_to_wait as u64));
-            }
+
+            Worker::sleep_until(next_check);
         }
     }
 
     fn run_poll(&mut self, sender: SyncSender<PackageInstall>) {
         loop {
-            let next_check = SteadyTime::now() +
-                TimeDuration::milliseconds(self.update_frequency());
-            let mut package: Option<PackageInstall> = None;
-            match self.depot.show_package(
-                &self.spec_ident,
-                Some(&self.channel),
+            let next_check = self.next_check_time();
+
+            match util::pkg::install(
+                &mut self.ui,
+                &self.builder_url,
+                &self.spec_ident.to_string(), // UGH
+                &self.channel,
             ) {
-                Ok(remote) => {
-                    let latest: PackageIdent = remote.get_ident().clone().into();
-                    if latest > self.current {
-                        outputln!("Updating from {} to {}", self.current, latest);
-                        match self.install(&latest, true) {
-                            Ok(pkg) => package = Some(pkg),
-                            Err(e) => warn!("Failed to install updated package: {:?}", e),
-                        }
+                Ok(maybe_newer_package) => {
+                    if self.current < *maybe_newer_package.ident() {
+                        outputln!(
+                            "Updating from {} to {}",
+                            self.current,
+                            maybe_newer_package.ident()
+                        );
+                        self.current = maybe_newer_package.ident().clone();
+                        sender.send(maybe_newer_package).expect(
+                            "Main thread has gone away!",
+                        );
+                        break; // REALLY!??!
                     } else {
+                        // TODO: Add more detail to this
                         debug!("Package found is not newer than ours");
                     }
                 }
                 Err(e) => warn!("Updater failed to get latest package: {:?}", e),
             }
-            if self.update_strategy == UpdateStrategy::AtOnce {
-                if let Ok(cached) = PackageInstall::load(
-                    &self.spec_ident,
-                    Some(&Path::new(&*FS_ROOT_PATH)),
-                )
-                {
-                    let compare = match package {
-                        Some(ref pkg) => pkg.ident.clone(),
-                        None => self.current.clone(),
-                    };
-
-                    if cached.ident > compare {
-                        package = Some(cached);
-                    }
-                }
-            }
-
-            if let Some(pkg) = package {
-                self.current = pkg.ident.clone();
-                sender.send(pkg).expect("Main thread has gone away!");
-                break;
-            }
-            let time_to_wait = (next_check - SteadyTime::now()).num_milliseconds();
-            if time_to_wait > 0 {
-                thread::sleep(Duration::from_millis(time_to_wait as u64));
-            }
+            Worker::sleep_until(next_check);
         }
     }
 
-    fn install(&mut self, package: &PackageIdent, recurse: bool) -> Result<PackageInstall> {
-        let package = match PackageInstall::load(package, Some(&*FS_ROOT_PATH)) {
-            Ok(pkg) => pkg,
-            Err(_) => self.download(package)?,
-        };
-        if recurse {
-            for ident in package.tdeps()?.iter() {
-                self.install(&ident, false)?;
-            }
-        }
-        Ok(package)
+    /// When is the next time we should poll for an update, given that
+    /// we're going to check right now?
+    fn next_check_time(&self) -> SteadyTime {
+        SteadyTime::now() + TimeDuration::milliseconds(self.update_frequency())
     }
 
-    fn download(&mut self, package: &PackageIdent) -> Result<PackageInstall> {
-        outputln!("Downloading {}", package);
-        let mut archive = self.depot.fetch_package(
-            package,
-            &Path::new(&*FS_ROOT_PATH).join(
-                CACHE_ARTIFACT_PATH,
-            ),
-            self.ui.progress(),
-        )?;
-
-        // TODO (CM): Copied (with modifications) from
-        // common::command::package::install; will be properly
-        // factored in an upcoming broad refactoring and consolidation
-        // of our installation logic.
-        let cache_key_path = &default_cache_key_path(None);
-        let nwr = artifact::artifact_signer(&archive.path)?;
-        if let Err(_) = SigKeyPair::get_public_key_path(&nwr, cache_key_path) {
-            self.fetch_origin_key(&nwr)?;
+    /// Given the next time we should poll for an update, sleep as
+    /// long as we need to until that time.
+    fn sleep_until(next_check_time: SteadyTime) {
+        let time_to_wait = (next_check_time - SteadyTime::now()).num_milliseconds();
+        if time_to_wait > 0 {
+            thread::sleep(Duration::from_millis(time_to_wait as u64));
         }
-
-        archive.verify(cache_key_path)?;
-        outputln!("Installing {}", package);
-        archive.unpack(None)?;
-        let pkg = PackageInstall::load(archive.ident().as_ref().unwrap(), Some(&*FS_ROOT_PATH))?;
-        Ok(pkg)
     }
 
     fn update_frequency(&self) -> i64 {
@@ -458,28 +417,5 @@ impl Worker {
             }
             Err(_) => DEFAULT_FREQUENCY,
         }
-    }
-
-    // TODO (CM): Copied (with modifications) from
-    // common::command::package::install; will be properly factored in
-    // an upcoming broad refactoring and consolidation of our
-    // installation logic.
-    fn fetch_origin_key(&mut self, name_with_rev: &str) -> Result<()> {
-        self.ui.status(
-            Status::Downloading,
-            format!("{} public origin key", &name_with_rev),
-        )?;
-        let (name, rev) = parse_name_with_rev(&name_with_rev)?;
-        self.depot.fetch_origin_key(
-            &name,
-            &rev,
-            &default_cache_key_path(None),
-            self.ui.progress(),
-        )?;
-        self.ui.status(
-            Status::Cached,
-            format!("{} public origin key", &name_with_rev),
-        )?;
-        Ok(())
     }
 }

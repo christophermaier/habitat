@@ -101,21 +101,17 @@ impl SelfUpdater {
 
     pub fn updated(&mut self) -> Option<PackageInstall> {
         match self.rx.try_recv() {
-            Ok(package) => return Some(package),
-            Err(TryRecvError::Empty) => return None,
-            Err(TryRecvError::Disconnected) => (),
-        }
-        error!("Self updater crashed, restarting...");
-        self.restart();
-        None
-    }
-
-    fn restart(&mut self) {
-        self.rx = Self::init(
-            self.current.clone(),
-            &self.update_url,
-            self.update_channel.clone(),
-        );
+            Ok(package) => Some(package),
+            Err(TryRecvError::Empty) => None,
+            Err(TryRecvError::Disconnected) => {
+                error!("Self updater crashed, restarting...");
+                self.rx = Self::init(
+                    self.current.clone(),
+                    &self.update_url,
+                    self.update_channel.clone(),
+                );
+                None
+            }
     }
 }
 

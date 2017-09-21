@@ -112,6 +112,7 @@ impl SelfUpdater {
                 );
                 None
             }
+        }
     }
 }
 

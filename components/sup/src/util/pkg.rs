@@ -21,7 +21,7 @@ use hcore::fs::{self, FS_ROOT_PATH};
 use hcore::package::PackageInstall;
 
 use {PRODUCT, VERSION};
-use error::Result;
+use error::{Result, SupError};
 
 // NOOOO, this is just for the sup crate... but we also do this in
 // hab, too! AAAAAAAA
@@ -56,8 +56,5 @@ pub fn install(
         false,
     )?;
 
-    // TODO (CM): Ideally, we'd just return the result of
-    // PackageInstall::load, but the error type isn't working out
-    // correctly. Look into that!
-    Ok(PackageInstall::load(&installed_ident, Some(&fs_root_path))?)
+    PackageInstall::load(&installed_ident, Some(&fs_root_path)).map_err(SupError::from)
 }

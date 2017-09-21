@@ -1,4 +1,4 @@
-// Copyright (c) 2016-2017 Chef Software Inc. and/or applicable contributors
+// Copyright (c) 2016 Chef Software Inc. and/or applicable contributors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -23,6 +23,15 @@ use hcore::package::PackageInstall;
 use {PRODUCT, VERSION};
 use error::Result;
 
+// NOOOO, this is just for the sup crate... but we also do this in
+// hab, too! AAAAAAAA
+/// Helper function for use in the Supervisor to handle lower-level
+/// arguments needed for installing a package.
+
+
+// TODO (CM): I think I want to pass in a depot client instead of a
+// URL here. That simplifies things by eliminating the PRODUCT,
+// VERSION stuff, and allows you to reuse a client for polling operations
 pub fn install(
     ui: &mut UI,
     url: &str,

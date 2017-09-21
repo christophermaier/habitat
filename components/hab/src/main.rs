@@ -467,6 +467,7 @@ fn sub_pkg_install(ui: &mut UI, m: &ArgMatches) -> Result<()> {
     let channel = channel_from_matches(m);
     let install_sources = install_sources_from_matches(m)?;
     let ignore_target = m.is_present("IGNORE_TARGET");
+
     init();
 
     for install_source in install_sources.iter() {

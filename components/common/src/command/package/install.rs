@@ -127,6 +127,8 @@ impl FromStr for InstallSource {
                 Err(e) => Err(e),
             }
         }
+        // TODO (CM): what about corner-case where a package
+        // identifier string is also a file?
     }
 }
 
@@ -164,6 +166,14 @@ impl AsRef<PackageIdent> for InstallSource {
 ///
 /// At the end of this function, the specified package and all its
 /// dependencies will be installed on the system.
+
+
+
+// TODO (CM): Consider passing in a configured depot client instead of
+// product / version... That might make it easier to share with the
+// `sup` crate
+
+
 pub fn start<P1, P2>(
     ui: &mut UI,
     url: &str,
@@ -179,6 +189,8 @@ where
     P1: AsRef<Path>,
     P2: AsRef<Path>,
 {
+    // TODO (CM): This should probably return an PackageInstall, from
+    // which you can get a PackageIdent
     if env::var_os("HAB_NON_ROOT").is_none() && !am_i_root() {
         ui.warn(
             "Installing a package requires root or administrator privileges. Please retry \
@@ -319,6 +331,7 @@ impl<'a> InstallTask<'a> {
             ident
         };
 
+        // TODO (CM): Also wondering if this should be a cache check?
         if self.is_package_installed(&target_ident)? {
             ui.status(Status::Using, &target_ident)?;
             ui.end(format!(

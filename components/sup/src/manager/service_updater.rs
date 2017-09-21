@@ -1,4 +1,4 @@
-// Copyright (c) 2016-2017 Chef Software Inc. and/or applicable contributors
+// Copyright (c) 2016 Chef Software Inc. and/or applicable contributors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -34,13 +34,22 @@ static LOGKEY: &'static str = "SU";
 const FREQUENCY_ENVVAR: &'static str = "HAB_UPDATE_STRATEGY_FREQUENCY_MS";
 const DEFAULT_FREQUENCY: i64 = 60_000;
 
+// TODO (CM): THIS IS CLEARLY NOT A LIST!!!!!!
 type UpdaterStateList = HashMap<ServiceGroup, UpdaterState>;
 
+// TODO (CM): I'd like a tighter correspondence between UpdaterState
+// and UpdateStrategy here.
 enum UpdaterState {
+    // TODO (CM): Investigate Receiver type
     AtOnce(Receiver<PackageInstall>),
     Rolling(RollingState),
+
+    // TODO: Should we also have a None state that corresponds with
+    // UpdateStrategy::None, as well as conversion functions between
+    // the two enums?
 }
 
+// TODO (CM): Add a default implementation that returns AwaitingElection
 enum RollingState {
     AwaitingElection,
     InElection,
@@ -49,12 +58,20 @@ enum RollingState {
 }
 
 enum LeaderState {
+    // TODO (CM): Which is it?
+    /// Checking to see if we've got a new package to install, or if
+    /// we should update????
     Polling(Receiver<PackageInstall>),
+    // TODO (CM): Waiting on what?
     Waiting,
 }
 
+/// Current package update state of a follower in a leader-follower
+/// topology
 enum FollowerState {
+    /// Waiting to be told to update
     Waiting,
+    /// Currently updating
     Updating(Receiver<PackageInstall>),
 }
 
@@ -71,6 +88,9 @@ impl ServiceUpdater {
         }
     }
 
+    /// Register a new `Service` for updates. Returns `true` if the
+    /// `ServiceUpdater` was modified (i.e., the given service has an
+    /// `UpdateStrategy` that is not `None`).
     pub fn add(&mut self, service: &Service) -> bool {
         match service.update_strategy {
             UpdateStrategy::None => false,
@@ -92,6 +112,12 @@ impl ServiceUpdater {
         }
     }
 
+    // TODO (CM): How do we remove something from the updater? e.g.,
+    // when we stop or unload a service?
+
+    /// See if the given service has an update. Returns `true` if a
+    /// new version was installed, thus signalling that the service
+    /// should be restarted
     pub fn check_for_updated_package(
         &mut self,
         service: &mut Service,
@@ -103,11 +129,16 @@ impl ServiceUpdater {
             Some(&mut UpdaterState::AtOnce(ref mut rx)) => {
                 match rx.try_recv() {
                     Ok(package) => {
+                        // TODO (CM): rename package to latest_package
                         service.update_package(package, launcher);
+
+                        // TODO (CM): Just set updated = true instead?
+                        // Or just return from this match directly?
                         return true;
                     }
                     Err(TryRecvError::Empty) => return false,
                     Err(TryRecvError::Disconnected) => {
+                        // TODO (CM): This is duplicated!
                         debug!("Service Updater worker has died; restarting...");
                         *rx = Worker::new(service).start(&service.service_group, None);
                     }
@@ -178,6 +209,7 @@ impl ServiceUpdater {
                             }
                             Err(TryRecvError::Empty) => return false,
                             Err(TryRecvError::Disconnected) => {
+                                // TODO (CM): This is duplicated!
                                 debug!("Service Updater worker has died; restarting...");
                                 *rx = Worker::new(service).start(&service.service_group, None);
                             }
@@ -220,6 +252,13 @@ impl ServiceUpdater {
                                     census_group.previous_peer(),
                                     census_group.me(),
                                 ) {
+
+                                    // TODO (CM): so, it looks as
+                                    // though CensusMember.pkg can
+                                    // return None, but only in the
+                                    // exceptional case where the
+                                    // service rumor it was generated
+                                    // from has an unparseable package identifier.
                                     (Some(leader), Some(peer), Some(me)) => {
                                         if leader.pkg == me.pkg {
                                             debug!("We're not in an update");
@@ -340,6 +379,10 @@ impl Worker {
     /// Passing an optional package identifier will make the worker perform a run-once update to
     /// retrieve a specific version from Builder. If no package identifier is specified,
     /// then the updater will poll until a newer more suitable package is found.
+
+    // TODO (CM): continue documenting
+    // TODO (CM): See if the remaining uses of start can take a
+    // PackageIdent instead of an Option
     fn start(mut self, sg: &ServiceGroup, ident: Option<PackageIdent>) -> Receiver<PackageInstall> {
         let (tx, rx) = sync_channel(0);
         thread::Builder::new()
@@ -352,6 +395,36 @@ impl Worker {
         rx
     }
 
+    // TODO (CM): A refactor I'd like to do is to tease out the
+    // run_once and run_poll cases into two separate "start" functions
+    // that describe more what's going on. Passing `None` as the
+    // identifier just means to keep going until you get a new
+    // one. Passing an identifier (which should probably be a
+    // fully-qualified one, right?) just goes until that package gets
+    // downloaded.
+    //
+    // In all cases except for FollowerState::Updating and
+    // FollowerState::Waiting, we pass None, so that's easy. In those
+    // two states, though, the package can legitimately be an Option
+    // (we get it from CensusMember.pkg), but it seems like it can
+    // only be None if there was an unparseable identifier in the
+    // ServiceRumor the CensusMember was generated from. I suspect
+    // that we might be able to refactor the types (or how we handle
+    // them) a bit better.
+    //
+    // I'm also not 100% clear why we have run_poll and run_once,
+    // since their implementations are very similar. There may be an
+    // opportunity to collapse those.
+
+    // TODO (CM, when back from school): remove the
+    // poll_until_newer_package_is_available, move on to
+    // self-updater. Further refactorings may present themselves then.
+
+    /// Polls until a newer version of the specified package is
+    /// available. When such a package is found, it is installed, and
+    /// the function exits.
+    // TODO (CM): Is the assumption that `ident` is fully-qualified? I
+    // think it should be...
     fn run_once(&mut self, sender: SyncSender<PackageInstall>, ident: PackageIdent) {
         outputln!("Updating from {} to {}", self.current, ident);
         let install_source = ident.into();
@@ -367,7 +440,7 @@ impl Worker {
                 Ok(package) => {
                     self.current = package.ident().clone();
                     sender.send(package).expect("Main thread has gone away!");
-                    break;
+                    break; // OK, so *this* break makes sense
                 }
                 Err(e) => warn!("Failed to install updated package: {:?}", e),
             }
@@ -376,6 +449,8 @@ impl Worker {
         }
     }
 
+    /// Continually poll for a new version of a package, installing it
+    /// when found.
     fn run_poll(&mut self, sender: SyncSender<PackageInstall>) {
         let install_source = self.spec_ident.clone().into(); // UGH clone
         loop {

@@ -491,6 +491,8 @@ fn sub_load(m: &ArgMatches) -> Result<()> {
     let mut spec = spec_from_matches(default_spec.ident, m)?;
     spec.start_style = StartStyle::Persistent;
 
+    // TODO (CM): Really want to have an enum of ident-or-path for
+    // this... if it's an ident, we don't need to keep reparsing it
     util::pkg::install(
         &mut UI::default(),
         &spec.bldr_url,
@@ -589,6 +591,10 @@ fn sub_start(m: &ArgMatches, launcher: LauncherCli) -> Result<()> {
 
     Manager::save_spec_for(&cfg, &spec)?;
 
+    // TODO (CM): Need the am_i_root warning message from
+    // command::start::run() here (or in a common function that fires
+    // up the manager for us)... of course, we should have already
+    // warned earlier because we're installing.
 
     if Manager::is_running(&cfg)? {
         outputln!(

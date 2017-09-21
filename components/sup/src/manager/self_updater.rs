@@ -12,6 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! Encapsulates logic required for updating the Habitat Supervisor
+//! itself.
+
+// TODO (CM): If we can collapse this into the updater code, then AWESOME.
+
 use std::sync::mpsc::{sync_channel, Receiver, SyncSender, TryRecvError};
 use std::thread;
 use std::time::Duration;
@@ -35,6 +40,11 @@ pub struct SelfUpdater {
     update_channel: String,
 }
 
+// TODO (CM): Want to use the Periodic trait here, but can't due to
+// how things are currently structured (The service updater had a worker)
+
+// TODO (CM): Need to take a review of all the types in
+// here... they're a little gross.
 impl SelfUpdater {
     pub fn new(current: PackageIdent, update_url: String, update_channel: String) -> Self {
         let rx = Self::init(current.clone(), &update_url, update_channel.clone());
@@ -46,6 +56,7 @@ impl SelfUpdater {
         }
     }
 
+    /// Spawn a new supervisor updater thread.
     fn init(
         current: PackageIdent,
         update_url: &str,

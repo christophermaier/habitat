@@ -18,13 +18,11 @@ use std::thread;
 
 use butterfly;
 use common::ui::{Coloring, UI};
-use depot_client;
 use env;
 use hcore::package::{PackageIdent, PackageInstall};
 use hcore::service::ServiceGroup;
 use launcher_client::LauncherCli;
 
-use {PRODUCT, VERSION};
 use census::CensusRing;
 use manager::periodic::Periodic;
 use manager::service::{Service, Topology, UpdateStrategy};
@@ -328,11 +326,8 @@ impl ServiceUpdater {
 struct Worker {
     current: PackageIdent,
     spec_ident: PackageIdent,
-    builder_url: String, // TODO (CM): possibly temporary; depends on
-    // if I keep depot_client as a thing.
-    depot: depot_client::Client,
+    builder_url: String,
     channel: String,
-    update_strategy: UpdateStrategy,
     ui: UI,
 }
 
@@ -367,9 +362,7 @@ impl Worker {
             current: service.pkg.ident.clone(),
             spec_ident: service.spec_ident.clone(),
             builder_url: service.bldr_url.clone(),
-            depot: depot_client::Client::new(&service.bldr_url, PRODUCT, VERSION, None).unwrap(),
             channel: service.channel.clone(),
-            update_strategy: service.update_strategy.clone(),
             ui: UI::default_with(Coloring::Never, None),
         }
     }

@@ -18,6 +18,7 @@ use std::time::Duration;
 
 use time::{SteadyTime, Duration as TimeDuration};
 
+use common::command::package::install::InstallSource;
 use common::ui::{Coloring, UI};
 use env;
 use hcore::package::{PackageIdent, PackageInstall};
@@ -66,13 +67,16 @@ impl SelfUpdater {
         channel: String,
     ) {
         debug!("Self updater current package, {}", current);
+        // SUP_PKG_IDENT will always parse as a valid PackageIdent,
+        // and thus a valid InstallSource
+        let install_source: InstallSource = SUP_PKG_IDENT.parse().unwrap();
         loop {
             let next_check = SteadyTime::now() + TimeDuration::milliseconds(update_frequency());
 
             match util::pkg::install(
                 &mut UI::default_with(Coloring::Never, None),
                 &builder_url,
-                SUP_PKG_IDENT,
+                &install_source,
                 &channel,
             ) {
                 Ok(package) => {

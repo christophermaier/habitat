@@ -39,6 +39,7 @@ use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
+use std::result::Result as StdResult;
 
 use depot_client::{self, Client};
 use depot_client::Error::APIError;
@@ -57,29 +58,109 @@ use retry::retry;
 pub const RETRIES: u64 = 5;
 pub const RETRY_WAIT: u64 = 3000;
 
+/// Represents a locally-available `.hart` file for package
+/// installation purposes only.
+///
+/// The struct itself must be public because it is used in
+/// `InstallSource` enum. The members are intentionally private,
+/// though; by design, the only way an instance of this struct can be
+/// created is to call `parse::<InstallSource>` on a file path that
+/// refers to a `.hart` file.
+///
+/// In other words, you are probably more interested in the
+/// `InstallSource` enum; this struct is just an implementation
+/// detail.
+pub struct LocalArchive {
+    // In an ideal world, we would just implement `InstallSource` in
+    // terms of a `PackageArchive` directly, since that can provide
+    // both an ident and path.
+    //
+    // However, asking for the ident of a `PackageArchive` is
+    // currently a mutating operation. As a result, that mutability
+    // requirement leaked out to all consumers of `InstallSource` in a
+    // way that was rather confusing.
+    //
+    // Instead, we simply bundle up both the path to the archive file
+    // along with the `PackageIdent` we extract from it when we create
+    // an instance of this struct (these data are the only things we
+    // really need to install from a local archive). The members are
+    // private to ensure that this module has full control over the
+    // creation of instances of the struct, and can thus ensure that
+    // the ident and path are mutually consistent and valid.
+    ident: PackageIdent,
+    path: PathBuf,
+}
+
+/// Encapsulate all possible sources we can install packages from.
+pub enum InstallSource {
+    /// We can install from a package identifier
+    Ident(PackageIdent),
+    /// We can install from a locally-available `.hart` file
+    Archive(LocalArchive),
+}
+
+impl FromStr for InstallSource {
+    // TODO (CM): need to create error types for bad conversions
+    type Err = hcore::Error;
+
+    /// Create an `InstallSource` from either a package identifier
+    /// string (e.g. "core/hab"), or from the path to a local package.
+    ///
+    /// Returns an error if the string is neither a valid package
+    /// identifier, or is not the path to an actual Habitat package.
+    fn from_str(s: &str) -> StdResult<InstallSource, Self::Err> {
+        let path = Path::new(s);
+        if path.is_file() {
+            // Is it really an archive? If it can produce an
+            // identifer, we'll say "yes".
+            let mut archive = PackageArchive::new(path);
+            match archive.ident() {
+                Ok(ident) => Ok(InstallSource::Archive(LocalArchive {
+                    ident: ident,
+                    path: path.to_path_buf(),
+                })),
+                Err(e) => Err(e),
+            }
+        } else {
+            match s.parse::<PackageIdent>() {
+                Ok(ident) => Ok(InstallSource::Ident(ident)),
+                Err(e) => Err(e),
+            }
+        }
+    }
+}
+
+impl From<PackageIdent> for InstallSource {
+    /// Convenience function to generate an `InstallSource` from an
+    /// existing `PackageIdent`.
+    fn from(ident: PackageIdent) -> Self {
+        InstallSource::Ident(ident)
+    }
+}
+
+impl AsRef<PackageIdent> for InstallSource {
+    fn as_ref(&self) -> &PackageIdent {
+        match *self {
+            InstallSource::Ident(ref ident) => ident,
+            InstallSource::Archive(ref local_archive) => &local_archive.ident,
+        }
+    }
+}
+
 /// Install a Habitat package.
 ///
-/// A package may be installed in one of two ways. First, the
-/// identifier of a package may be given. This may be any of the
-/// following forms:
+/// If an `InstallSource::Ident` is given, we retrieve the package
+/// from the specified Builder `url`. Providing a fully-qualified
+/// identifer will result in that exact package being installed
+/// (regardless of `channel`). Providing a partially-qualified
+/// identifier will result in the installation of latest appropriate
+/// release from the given `channel`.
 ///
-/// * origin/package
-/// * origin/package/version
-/// * origin/package/version/release
+/// If an `InstallSource::Archive` is given, then this exact artifact will be
+/// installed, instead of retrieving it from Builder.
 ///
-/// The final of these forms is "fully-qualified".
-///
-/// If a fully-qualified identifier is provided, then this exact
-/// artifact will be retrieved from the depot. If either of the other
-/// identifier forms are given, we attempt to install the latest
-/// appropriate version from the given channel.
-///
-/// Instead of a package identifier, the path to a local `.hart`
-/// archive on disk may be provided. This exact artifact will be
-/// installed, instead of making a call to the depot.
-///
-/// In _both_ cases, any dependencies of the artifacts will installed
-/// from the depot.
+/// In either case, however, any dependencies of will be retrieved
+/// from Builder.
 ///
 /// At the end of this function, the specified package and all its
 /// dependencies will be installed on the system.
@@ -87,7 +168,7 @@ pub fn start<P1, P2>(
     ui: &mut UI,
     url: &str,
     channel: Option<&str>,
-    ident_or_archive: &str,
+    install_source: &InstallSource,
     product: &str,
     version: &str,
     fs_root_path: P1,
@@ -121,10 +202,9 @@ where
         ignore_target,
     )?;
 
-    if Path::new(ident_or_archive).is_file() {
-        task.from_artifact(ui, &Path::new(ident_or_archive))
-    } else {
-        task.from_ident(ui, PackageIdent::from_str(ident_or_archive)?, channel)
+    match *install_source {
+        InstallSource::Ident(ref ident) => task.from_ident(ui, ident.clone(), channel),
+        InstallSource::Archive(ref local_archive) => task.from_archive(ui, local_archive),
     }
 }
 
@@ -159,15 +239,16 @@ impl<'a> InstallTask<'a> {
     /// Install a package from the Depot, based on a given identifier.
     ///
     /// If the identifier is fully-qualified, that specific package
-    /// release will be installed (if it exists in the Depot).
+    /// release will be installed (if it exists on Builder).
     ///
     /// However, if the identifier is _not_ fully-qualified, the
     /// latest version from the given channel will be installed
     /// instead.
     ///
-    /// In either case, the identifier returned is that of the package
-    /// that was installed (which, as we have seen, may not be the
-    /// same as the identifier that was passed in).
+    /// In either case, the identifier returned will be the
+    /// fully-qualified identifier of package that was infstalled
+    /// (which, as we have seen, may not be the same as the identifier
+    /// that was passed in).
     fn from_ident(
         &self,
         ui: &mut UI,
@@ -278,23 +359,23 @@ impl<'a> InstallTask<'a> {
         Ok(res)
     }
 
-    /// Given the path to an artifact on disk, ensure that it is
-    /// properly installed and return the package's identifier.
-    fn from_artifact(&self, ui: &mut UI, artifact_path: &Path) -> Result<PackageIdent> {
-        let ident = PackageArchive::new(artifact_path).ident()?;
-        if self.is_package_installed(&ident)? {
-            ui.status(Status::Using, &ident)?;
+    /// Given an archive on disk, ensure that it is properly installed
+    /// and return the package's identifier.
+    fn from_archive(&self, ui: &mut UI, local_archive: &LocalArchive) -> Result<PackageIdent> {
+        let ref ident = local_archive.ident;
+        if self.is_package_installed(ident)? {
+            ui.status(Status::Using, ident)?;
             ui.end(format!(
                 "Install of {} complete with {} new packages installed.",
-                &ident,
+                ident,
                 0
             ))?;
         } else {
-            self.store_artifact_in_cache(&ident, artifact_path)?;
-            self.install_package(ui, &ident)?;
+            self.store_artifact_in_cache(ident, &local_archive.path)?;
+            self.install_package(ui, ident)?;
         }
 
-        Ok(ident)
+        Ok(ident.clone())
     }
 
     /// Given the identifier of an artifact, ensure that the artifact,
@@ -318,6 +399,9 @@ impl<'a> InstallTask<'a> {
                 artifacts_to_install.push(self.get_cached_artifact(ui, dependency)?);
             }
         }
+        // The package we're actually trying to install goes last; we
+        // want to ensure that its dependencies get installed before
+        // it does.
         artifacts_to_install.push(artifact);
 
         // Ensure all uninstalled artifacts get installed
@@ -400,7 +484,6 @@ impl<'a> InstallTask<'a> {
     ) -> Result<PackageIdent> {
         Ok(self.depot_client.show_package(ident, channel)?.into())
     }
-
 
     /// Retrieve the identified package from the depot, ensuring that
     /// the artifact is cached locally.

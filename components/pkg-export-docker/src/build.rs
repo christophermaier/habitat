@@ -18,6 +18,7 @@ use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
 use common;
+use common::command::package::install::InstallSource;
 use common::ui::{UI, Status};
 use hab;
 use hcore::fs::{CACHE_ARTIFACT_PATH, cache_artifact_path};
@@ -220,11 +221,14 @@ impl<'a> BuildSpec<'a> {
         channel: &str,
         fs_root_path: P,
     ) -> Result<PackageIdent> {
+
+        let install_source: InstallSource = ident_or_archive.parse()?;
+
         Ok(common::command::package::install::start(
             ui,
             url,
             Some(channel),
-            ident_or_archive,
+            &install_source,
             &*PROGRAM_NAME,
             VERSION,
             &fs_root_path,

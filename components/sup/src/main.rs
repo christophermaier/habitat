@@ -36,13 +36,14 @@ use std::str::FromStr;
 
 use ansi_term::Colour::{Red, Yellow};
 use clap::{App, ArgMatches};
+use common::command::package::install::InstallSource;
 use common::ui::UI;
 use hcore::channel;
 use hcore::crypto::{self, default_cache_key_path, SymKey};
 #[cfg(windows)]
 use hcore::crypto::dpapi::encrypt;
 use hcore::env as henv;
-use hcore::package::{PackageArchive, PackageIdent};
+use hcore::package::PackageIdent;
 use hcore::service::{ApplicationEnvironment, ServiceGroup};
 use hcore::url::default_bldr_url;
 use launcher_client::{LauncherCli, ERR_NO_RETRY_EXCODE, OK_NO_RETRY_EXCODE};
@@ -472,7 +473,14 @@ fn sub_load(m: &ArgMatches) -> Result<()> {
         hcore::output::set_no_color(true);
     }
     let cfg = mgrcfg_from_matches(m)?;
+
     let ident = PackageIdent::from_str(m.value_of("PKG_IDENT").unwrap())?;
+    // While an InstallSource can be created from a string, that would
+    // permit the use of an ident or a file path; this command
+    // currently explicitly calls for an ident, so we generate the
+    // InstallSource directly from a valid PackageIdent instead.
+    let install_source = ident.clone().into();
+
     let default_spec = ServiceSpec::default_for(ident);
     let spec_file = Manager::spec_path_for(&cfg, &default_spec);
     if let Ok(spec) = ServiceSpec::from_file(&spec_file) {
@@ -486,7 +494,7 @@ fn sub_load(m: &ArgMatches) -> Result<()> {
     util::pkg::install(
         &mut UI::default(),
         &spec.bldr_url,
-        &spec.ident.to_string(),
+        &install_source,
         &spec.channel,
     )?;
 
@@ -539,11 +547,8 @@ fn sub_start(m: &ArgMatches, launcher: LauncherCli) -> Result<()> {
 
     // PKG_IDENT_OR_ARTIFACT is required, so unwrap() is safe here
     let ident_or_artifact = m.value_of("PKG_IDENT_OR_ARTIFACT").unwrap();
-    let ident = if Path::new(ident_or_artifact).is_file() {
-        PackageArchive::new(Path::new(ident_or_artifact)).ident()?
-    } else {
-        PackageIdent::from_str(ident_or_artifact)?
-    };
+    let install_source: InstallSource = ident_or_artifact.parse()?;
+    let ident: &PackageIdent = install_source.as_ref();
 
     // NOTE: As coded, if you try to start a service from a hart file,
     // but you already have a spec for that service (regardless of
@@ -567,7 +572,7 @@ fn sub_start(m: &ArgMatches, launcher: LauncherCli) -> Result<()> {
         None => {
             let depot_url = bldr_url_from_matches(m);
             let channel = channel_from_matches(m);
-            util::pkg::install(&mut UI::default(), &depot_url, &ident_or_artifact, &channel)?;
+            util::pkg::install(&mut UI::default(), &depot_url, &install_source, &channel)?;
 
             // Note that this spec will be for a fully-qualified
             // identifier if starting from a hart file (IOW, it's
@@ -578,7 +583,7 @@ fn sub_start(m: &ArgMatches, launcher: LauncherCli) -> Result<()> {
             // than the PackageInstall that comes back from installing
             // the package, because that will *always* be a
             // fully-qualified identifier.
-            spec_from_matches(ident, m)?
+            spec_from_matches(ident.clone(), m)?
         }
     };
 

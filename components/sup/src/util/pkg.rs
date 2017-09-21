@@ -15,6 +15,7 @@
 use std::path::Path;
 
 use common;
+use common::command::package::install::InstallSource;
 use common::ui::UI;
 use hcore::fs::{self, FS_ROOT_PATH};
 use hcore::package::PackageInstall;
@@ -25,7 +26,7 @@ use error::Result;
 pub fn install(
     ui: &mut UI,
     url: &str,
-    ident: &str, // TODO (CM): or an enum of PackageIdent, or path
+    install_source: &InstallSource,
     channel: &str,
 ) -> Result<PackageInstall> {
     let fs_root_path = Path::new(&*FS_ROOT_PATH);
@@ -38,7 +39,7 @@ pub fn install(
         // push this "Option-ness" as far down the stack as we can,
         // with the ultimate goal of eliminating it altogether.
         Some(channel),
-        &ident,
+        install_source,
         PRODUCT,
         VERSION,
         fs_root_path,

@@ -38,6 +38,7 @@ use std::thread;
 
 use clap::{ArgMatches, Shell};
 
+use common::command::package::install::InstallSource;
 use common::ui::{Coloring, UI, NOCOLORING_ENVVAR, NONINTERACTIVE_ENVVAR};
 use hcore::channel;
 use hcore::crypto::{init, default_cache_key_path, SigKeyPair};
@@ -454,19 +455,26 @@ fn dest_dir_from_matches(matches: &ArgMatches) -> PathBuf {
     Path::new(matches.value_of("DEST_DIR").unwrap_or(&env_or_default)).to_path_buf()
 }
 
+fn install_sources_from_matches(matches: &ArgMatches) -> Result<Vec<InstallSource>> {
+    matches.values_of("PKG_IDENT_OR_ARTIFACT")
+        .unwrap() // Required via clap
+        .map(|t| t.parse().map_err(Error::from)) // TODO (CM): This feels odd...
+        .collect()
+}
+
 fn sub_pkg_install(ui: &mut UI, m: &ArgMatches) -> Result<()> {
     let url = bldr_url_from_matches(m);
     let channel = channel_from_matches(m);
-    let ident_or_artifacts = m.values_of("PKG_IDENT_OR_ARTIFACT").unwrap(); // Required via clap
+    let install_sources = install_sources_from_matches(m)?;
     let ignore_target = m.is_present("IGNORE_TARGET");
     init();
 
-    for ident_or_artifact in ident_or_artifacts {
+    for install_source in install_sources.iter() {
         let pkg_ident = common::command::package::install::start(
             ui,
             &url,
             Some(&channel),
-            ident_or_artifact,
+            install_source,
             PRODUCT,
             VERSION,
             &*FS_ROOT,

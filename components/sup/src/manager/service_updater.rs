@@ -354,13 +354,14 @@ impl Worker {
 
     fn run_once(&mut self, sender: SyncSender<PackageInstall>, ident: PackageIdent) {
         outputln!("Updating from {} to {}", self.current, ident);
+        let install_source = ident.into();
         loop {
             let next_time = self.next_period_start();
 
             match util::pkg::install(
                 &mut self.ui,
                 &self.builder_url,
-                &ident.to_string(), // UGH
+                &install_source,
                 &self.channel,
             ) {
                 Ok(package) => {
@@ -376,13 +377,14 @@ impl Worker {
     }
 
     fn run_poll(&mut self, sender: SyncSender<PackageInstall>) {
+        let install_source = self.spec_ident.clone().into(); // UGH clone
         loop {
             let next_time = self.next_period_start();
 
             match util::pkg::install(
                 &mut self.ui,
                 &self.builder_url,
-                &self.spec_ident.to_string(), // UGH
+                &install_source,
                 &self.channel,
             ) {
                 Ok(maybe_newer_package) => {

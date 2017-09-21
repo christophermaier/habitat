@@ -485,7 +485,7 @@ fn sub_load(m: &ArgMatches) -> Result<()> {
 
     util::pkg::install(
         &mut UI::default(),
-        &spec.depot_url,
+        &spec.bldr_url,
         &spec.ident.to_string(),
         &spec.channel,
     )?;

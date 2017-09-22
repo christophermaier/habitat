@@ -100,7 +100,6 @@ pub enum InstallSource {
 }
 
 impl FromStr for InstallSource {
-    // TODO (CM): need to create error types for bad conversions
     type Err = hcore::Error;
 
     /// Create an `InstallSource` from either a package identifier
@@ -127,8 +126,6 @@ impl FromStr for InstallSource {
                 Err(e) => Err(e),
             }
         }
-        // TODO (CM): what about corner-case where a package
-        // identifier string is also a file?
     }
 }
 
@@ -354,8 +351,7 @@ impl<'a> InstallTask<'a> {
             Ok(channels) => channels,
             Err(e) => {
                 debug!("Failed to get channel list: {:?}", e);
-                return Err(Error::PackageNotFound); // TODO (CM): is
-                // this the appropriate error?
+                return Err(Error::PackageNotFound);
             }
         };
 

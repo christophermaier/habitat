@@ -75,8 +75,6 @@ type Metadata = HashMap<MetaFile, String>;
 
 #[derive(Debug)]
 pub struct PackageArchive {
-    // TODO (CM): rename this member, to not cause confusion with
-    // path() function.
     pub path: PathBuf,
     metadata: Option<Metadata>,
 }

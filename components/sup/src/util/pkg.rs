@@ -27,11 +27,6 @@ use error::{Result, SupError};
 // hab, too! AAAAAAAA
 /// Helper function for use in the Supervisor to handle lower-level
 /// arguments needed for installing a package.
-
-
-// TODO (CM): I think I want to pass in a depot client instead of a
-// URL here. That simplifies things by eliminating the PRODUCT,
-// VERSION stuff, and allows you to reuse a client for polling operations
 pub fn install(
     ui: &mut UI,
     url: &str,

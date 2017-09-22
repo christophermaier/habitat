@@ -175,7 +175,6 @@ impl Service {
         organization: Option<&str>,
     ) -> Result<Service> {
         // The package for a spec should already be installed.
-        // TODO (CM): Consolidate all this path mess
         let fs_root_path = Path::new(&*FS_ROOT_PATH);
         let package = PackageInstall::load(&spec.ident, Some(fs_root_path))?;
         Ok(Self::new(sys, package, spec, manager_fs_cfg, organization)?)

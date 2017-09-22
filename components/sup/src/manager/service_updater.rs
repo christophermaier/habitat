@@ -32,22 +32,13 @@ static LOGKEY: &'static str = "SU";
 const FREQUENCY_ENVVAR: &'static str = "HAB_UPDATE_STRATEGY_FREQUENCY_MS";
 const DEFAULT_FREQUENCY: i64 = 60_000;
 
-// TODO (CM): THIS IS CLEARLY NOT A LIST!!!!!!
 type UpdaterStateList = HashMap<ServiceGroup, UpdaterState>;
 
-// TODO (CM): I'd like a tighter correspondence between UpdaterState
-// and UpdateStrategy here.
 enum UpdaterState {
-    // TODO (CM): Investigate Receiver type
     AtOnce(Receiver<PackageInstall>),
     Rolling(RollingState),
-
-    // TODO: Should we also have a None state that corresponds with
-    // UpdateStrategy::None, as well as conversion functions between
-    // the two enums?
 }
 
-// TODO (CM): Add a default implementation that returns AwaitingElection
 enum RollingState {
     AwaitingElection,
     InElection,
@@ -56,11 +47,7 @@ enum RollingState {
 }
 
 enum LeaderState {
-    // TODO (CM): Which is it?
-    /// Checking to see if we've got a new package to install, or if
-    /// we should update????
     Polling(Receiver<PackageInstall>),
-    // TODO (CM): Waiting on what?
     Waiting,
 }
 
@@ -127,16 +114,11 @@ impl ServiceUpdater {
             Some(&mut UpdaterState::AtOnce(ref mut rx)) => {
                 match rx.try_recv() {
                     Ok(package) => {
-                        // TODO (CM): rename package to latest_package
                         service.update_package(package, launcher);
-
-                        // TODO (CM): Just set updated = true instead?
-                        // Or just return from this match directly?
                         return true;
                     }
                     Err(TryRecvError::Empty) => return false,
                     Err(TryRecvError::Disconnected) => {
-                        // TODO (CM): This is duplicated!
                         debug!("Service Updater worker has died; restarting...");
                         *rx = Worker::new(service).start(&service.service_group, None);
                     }
@@ -207,7 +189,6 @@ impl ServiceUpdater {
                             }
                             Err(TryRecvError::Empty) => return false,
                             Err(TryRecvError::Disconnected) => {
-                                // TODO (CM): This is duplicated!
                                 debug!("Service Updater worker has died; restarting...");
                                 *rx = Worker::new(service).start(&service.service_group, None);
                             }
@@ -250,13 +231,6 @@ impl ServiceUpdater {
                                     census_group.previous_peer(),
                                     census_group.me(),
                                 ) {
-
-                                    // TODO (CM): so, it looks as
-                                    // though CensusMember.pkg can
-                                    // return None, but only in the
-                                    // exceptional case where the
-                                    // service rumor it was generated
-                                    // from has an unparseable package identifier.
                                     (Some(leader), Some(peer), Some(me)) => {
                                         if leader.pkg == me.pkg {
                                             debug!("We're not in an update");
@@ -372,10 +346,6 @@ impl Worker {
     /// Passing an optional package identifier will make the worker perform a run-once update to
     /// retrieve a specific version from Builder. If no package identifier is specified,
     /// then the updater will poll until a newer more suitable package is found.
-
-    // TODO (CM): continue documenting
-    // TODO (CM): See if the remaining uses of start can take a
-    // PackageIdent instead of an Option
     fn start(mut self, sg: &ServiceGroup, ident: Option<PackageIdent>) -> Receiver<PackageInstall> {
         let (tx, rx) = sync_channel(0);
         thread::Builder::new()
@@ -408,17 +378,12 @@ impl Worker {
     // I'm also not 100% clear why we have run_poll and run_once,
     // since their implementations are very similar. There may be an
     // opportunity to collapse those.
-
-    // TODO (CM, when back from school): remove the
-    // poll_until_newer_package_is_available, move on to
-    // self-updater. Further refactorings may present themselves then.
-
     /// Polls until a newer version of the specified package is
     /// available. When such a package is found, it is installed, and
     /// the function exits.
-    // TODO (CM): Is the assumption that `ident` is fully-qualified? I
-    // think it should be...
     fn run_once(&mut self, sender: SyncSender<PackageInstall>, ident: PackageIdent) {
+        // Fairly certain that this only gets called in a rolling update
+        // scenario, where `ident` is always a fully-qualified identifier
         outputln!("Updating from {} to {}", self.current, ident);
         let install_source = ident.into();
         loop {
@@ -433,7 +398,7 @@ impl Worker {
                 Ok(package) => {
                     self.current = package.ident().clone();
                     sender.send(package).expect("Main thread has gone away!");
-                    break; // OK, so *this* break makes sense
+                    break;
                 }
                 Err(e) => warn!("Failed to install updated package: {:?}", e),
             }
@@ -466,9 +431,8 @@ impl Worker {
                         sender.send(maybe_newer_package).expect(
                             "Main thread has gone away!",
                         );
-                        break; // REALLY!??!
+                        break;
                     } else {
-                        // TODO: Add more detail to this
                         debug!("Package found is not newer than ours");
                     }
                 }

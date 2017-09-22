@@ -431,8 +431,8 @@ fn sub_plan_init(ui: &mut UI, m: &ArgMatches) -> Result<()> {
 }
 
 // TODO (CM): Copied from hab_sup::main... find a way to share?
-// Resolve a Builder URL. Taken from the environment or from CLI args,
-// if given.
+/// Resolve a Builder URL. Taken from the environment or from CLI args,
+/// if given.
 fn bldr_url_from_matches(matches: &ArgMatches) -> String {
     match matches.value_of("BLDR_URL") {
         Some(url) => url.to_string(),
@@ -441,8 +441,8 @@ fn bldr_url_from_matches(matches: &ArgMatches) -> String {
 }
 
 // TODO (CM): Copied from hab_sup::main... find a way to share?
-// Resolve a channel. Taken from the environment or from CLI args, if
-// given.
+/// Resolve a channel. Taken from the environment or from CLI args, if
+/// given.
 fn channel_from_matches(matches: &ArgMatches) -> String {
     matches
         .value_of("CHANNEL")

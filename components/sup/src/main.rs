@@ -775,8 +775,8 @@ fn mgrcfg_from_matches(m: &ArgMatches) -> Result<ManagerConfig> {
     Ok(cfg)
 }
 
-// Resolve a Builder URL. Taken from the environment or from CLI args,
-// if given.
+/// Resolve a Builder URL. Taken from the environment or from CLI args,
+/// if given.
 fn bldr_url_from_matches(matches: &ArgMatches) -> String {
     match matches.value_of("BLDR_URL") {
         Some(url) => url.to_string(),
@@ -784,8 +784,8 @@ fn bldr_url_from_matches(matches: &ArgMatches) -> String {
     }
 }
 
-// Resolve a channel. Taken from the environment or from CLI args, if
-// given.
+/// Resolve a channel. Taken from the environment or from CLI args, if
+/// given.
 fn channel_from_matches(matches: &ArgMatches) -> String {
     matches
         .value_of("CHANNEL")

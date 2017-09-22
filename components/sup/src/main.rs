@@ -491,8 +491,6 @@ fn sub_load(m: &ArgMatches) -> Result<()> {
     let mut spec = spec_from_matches(default_spec.ident, m)?;
     spec.start_style = StartStyle::Persistent;
 
-    // TODO (CM): Really want to have an enum of ident-or-path for
-    // this... if it's an ident, we don't need to keep reparsing it
     util::pkg::install(
         &mut UI::default(),
         &spec.bldr_url,

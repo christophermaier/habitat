@@ -39,7 +39,7 @@ pub fn install(
     channel: &str,
 ) -> Result<PackageInstall> {
     let fs_root_path = Path::new(&*FS_ROOT_PATH);
-    let installed_ident = common::command::package::install::start(
+    common::command::package::install::start(
         ui,
         url,
         // We currently need this to be an option due to how the depot
@@ -54,7 +54,5 @@ pub fn install(
         fs_root_path,
         &fs::cache_artifact_path(None::<String>),
         false,
-    )?;
-
-    PackageInstall::load(&installed_ident, Some(&fs_root_path)).map_err(SupError::from)
+    ).map_err(SupError::from)
 }

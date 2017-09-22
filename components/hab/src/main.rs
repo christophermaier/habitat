@@ -471,7 +471,7 @@ fn sub_pkg_install(ui: &mut UI, m: &ArgMatches) -> Result<()> {
     init();
 
     for install_source in install_sources.iter() {
-        let pkg_ident = common::command::package::install::start(
+        let pkg_install = common::command::package::install::start(
             ui,
             &url,
             Some(&channel),
@@ -486,7 +486,13 @@ fn sub_pkg_install(ui: &mut UI, m: &ArgMatches) -> Result<()> {
         if m.is_present("BINLINK") {
             let dest_dir = dest_dir_from_matches(m);
             let force = m.is_present("FORCE");
-            command::pkg::binlink::binlink_all_in_pkg(ui, &pkg_ident, &dest_dir, &*FS_ROOT, force)?;
+            command::pkg::binlink::binlink_all_in_pkg(
+                ui,
+                pkg_install.ident(),
+                dest_dir,
+                &*FS_ROOT,
+                force,
+            )?;
         }
     }
     Ok(())

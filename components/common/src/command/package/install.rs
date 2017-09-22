@@ -184,13 +184,11 @@ pub fn start<P1, P2>(
     fs_root_path: P1,
     artifact_cache_path: P2,
     ignore_target: bool,
-) -> Result<PackageIdent>
+) -> Result<PackageInstall>
 where
     P1: AsRef<Path>,
     P2: AsRef<Path>,
 {
-    // TODO (CM): This should probably return an PackageInstall, from
-    // which you can get a PackageIdent
     if env::var_os("HAB_NON_ROOT").is_none() && !am_i_root() {
         ui.warn(
             "Installing a package requires root or administrator privileges. Please retry \
@@ -266,7 +264,7 @@ impl<'a> InstallTask<'a> {
         ui: &mut UI,
         ident: PackageIdent,
         channel: Option<&str>,
-    ) -> Result<PackageIdent> {
+    ) -> Result<PackageInstall> {
         if channel.is_some() {
             ui.begin(format!(
                 "Installing {} from channel '{}'",
@@ -331,19 +329,18 @@ impl<'a> InstallTask<'a> {
             ident
         };
 
-        // TODO (CM): Also wondering if this should be a cache check?
-        if self.is_package_installed(&target_ident)? {
-            ui.status(Status::Using, &target_ident)?;
-            ui.end(format!(
-                "Install of {} complete with {} new packages installed.",
-                &target_ident,
-                0
-            ))?;
-        } else {
-            self.install_package(ui, &target_ident)?;
+        match self.installed_package(&target_ident) {
+            Some(package_install) => {
+                ui.status(Status::Using, &target_ident)?;
+                ui.end(format!(
+                    "Install of {} complete with {} new packages installed.",
+                    &target_ident,
+                    0
+                ))?;
+                Ok(package_install)
+            }
+            None => self.install_package(ui, &target_ident),
         }
-
-        Ok(target_ident)
     }
 
     /// Get a list of suggested package identifiers from all
@@ -374,21 +371,23 @@ impl<'a> InstallTask<'a> {
 
     /// Given an archive on disk, ensure that it is properly installed
     /// and return the package's identifier.
-    fn from_archive(&self, ui: &mut UI, local_archive: &LocalArchive) -> Result<PackageIdent> {
+    fn from_archive(&self, ui: &mut UI, local_archive: &LocalArchive) -> Result<PackageInstall> {
         let ref ident = local_archive.ident;
-        if self.is_package_installed(ident)? {
-            ui.status(Status::Using, ident)?;
-            ui.end(format!(
-                "Install of {} complete with {} new packages installed.",
-                ident,
-                0
-            ))?;
-        } else {
-            self.store_artifact_in_cache(ident, &local_archive.path)?;
-            self.install_package(ui, ident)?;
+        match self.installed_package(ident) {
+            Some(package_install) => {
+                ui.status(Status::Using, ident)?;
+                ui.end(format!(
+                    "Install of {} complete with {} new packages installed.",
+                    ident,
+                    0
+                ))?;
+                Ok(package_install)
+            }
+            None => {
+                self.store_artifact_in_cache(ident, &local_archive.path)?;
+                self.install_package(ui, ident)
+            }
         }
-
-        Ok(ident.clone())
     }
 
     /// Given the identifier of an artifact, ensure that the artifact,
@@ -398,7 +397,7 @@ impl<'a> InstallTask<'a> {
     /// If the package is already present in the cache, it is not
     /// re-downloaded. Any dependencies of the package that are not
     /// installed will be re-cached (as needed) and installed.
-    fn install_package(&self, ui: &mut UI, ident: &PackageIdent) -> Result<()> {
+    fn install_package(&self, ui: &mut UI, ident: &PackageIdent) -> Result<PackageInstall> {
         let mut artifact = self.get_cached_artifact(ui, ident)?;
 
         // Ensure that all transitive dependencies, as well as the
@@ -406,7 +405,7 @@ impl<'a> InstallTask<'a> {
         let dependencies = artifact.tdeps()?;
         let mut artifacts_to_install = Vec::with_capacity(dependencies.len() + 1);
         for dependency in dependencies.iter() {
-            if self.is_package_installed(dependency)? {
+            if self.installed_package(dependency).is_some() {
                 ui.status(Status::Using, dependency)?;
             } else {
                 artifacts_to_install.push(self.get_cached_artifact(ui, dependency)?);
@@ -428,7 +427,8 @@ impl<'a> InstallTask<'a> {
             artifacts_to_install.len()
         ))?;
 
-        Ok(())
+        // Return the thing we just installed
+        PackageInstall::load(ident, Some(self.fs_root_path)).map_err(Error::from)
     }
 
     /// This ensures the identified package is in the local cache,
@@ -468,14 +468,10 @@ impl<'a> InstallTask<'a> {
         Ok(())
     }
 
-    /// Is the package already unpacked / installed (i.e., present in
-    /// `/hab/pkgs/$ORIGIN/$PACKAGE/$VERSION/$RELEASE`)?
-    fn is_package_installed(&self, ident: &PackageIdent) -> Result<bool> {
-        match PackageInstall::load(ident, Some(self.fs_root_path)) {
-            Ok(_) => Ok(true),
-            Err(hcore::Error::PackageNotFound(_)) => Ok(false),
-            Err(e) => Err(Error::HabitatCore(e)),
-        }
+    /// Adapter function to retrieve an installed package given an
+    /// identifier, if it exists.
+    fn installed_package(&self, ident: &PackageIdent) -> Option<PackageInstall> {
+        PackageInstall::load(ident, Some(self.fs_root_path)).ok()
     }
 
     fn is_artifact_cached(&self, ident: &PackageIdent) -> Result<bool> {

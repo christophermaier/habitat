@@ -223,8 +223,7 @@ impl<'a> BuildSpec<'a> {
     ) -> Result<PackageIdent> {
 
         let install_source: InstallSource = ident_or_archive.parse()?;
-
-        Ok(common::command::package::install::start(
+        let package_install = common::command::package::install::start(
             ui,
             url,
             Some(channel),
@@ -234,7 +233,8 @@ impl<'a> BuildSpec<'a> {
             &fs_root_path,
             &cache_artifact_path(Some(&fs_root_path)),
             false,
-        )?)
+        )?;
+        Ok(package_install.ident().clone())
     }
 }
 

@@ -41,11 +41,9 @@ pub struct SelfUpdater {
 // TODO (CM): Want to use the Periodic trait here, but can't due to
 // how things are currently structured (The service updater had a worker)
 
-// TODO (CM): Need to take a review of all the types in
-// here... they're a little gross.
 impl SelfUpdater {
     pub fn new(current: PackageIdent, update_url: String, update_channel: String) -> Self {
-        let rx = Self::init(current.clone(), &update_url, update_channel.clone());
+        let rx = Self::init(current.clone(), update_url.clone(), update_channel.clone());
         SelfUpdater {
             rx: rx,
             current: current,
@@ -57,14 +55,13 @@ impl SelfUpdater {
     /// Spawn a new supervisor updater thread.
     fn init(
         current: PackageIdent,
-        update_url: &str,
+        update_url: String,
         update_channel: String,
     ) -> Receiver<PackageInstall> {
         let (tx, rx) = sync_channel(0);
-        let url = update_url.to_string(); // eww
         thread::Builder::new()
             .name("self-updater".to_string())
-            .spawn(move || Self::run(tx, current, url, update_channel))
+            .spawn(move || Self::run(tx, current, update_url, update_channel))
             .expect("Unable to start self-updater thread");
         rx
     }
@@ -120,7 +117,7 @@ impl SelfUpdater {
                 error!("Self updater crashed, restarting...");
                 self.rx = Self::init(
                     self.current.clone(),
-                    &self.update_url,
+                    self.update_url.clone(),
                     self.update_channel.clone(),
                 );
                 None

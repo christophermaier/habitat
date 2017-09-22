@@ -114,7 +114,7 @@ impl SelfUpdater {
             Ok(package) => Some(package),
             Err(TryRecvError::Empty) => None,
             Err(TryRecvError::Disconnected) => {
-                error!("Self updater crashed, restarting...");
+                debug!("Self updater has died, restarting...");
                 self.rx = Self::init(
                     self.current.clone(),
                     self.update_url.clone(),

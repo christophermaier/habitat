@@ -15,8 +15,6 @@
 //! Encapsulates logic required for updating the Habitat Supervisor
 //! itself.
 
-// TODO (CM): If we can collapse this into the updater code, then AWESOME.
-
 use std::sync::mpsc::{sync_channel, Receiver, SyncSender, TryRecvError};
 use std::thread;
 use std::time::Duration;

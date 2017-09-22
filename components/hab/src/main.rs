@@ -458,7 +458,7 @@ fn dest_dir_from_matches(matches: &ArgMatches) -> PathBuf {
 fn install_sources_from_matches(matches: &ArgMatches) -> Result<Vec<InstallSource>> {
     matches.values_of("PKG_IDENT_OR_ARTIFACT")
         .unwrap() // Required via clap
-        .map(|t| t.parse().map_err(Error::from)) // TODO (CM): This feels odd...
+        .map(|t| t.parse().map_err(Error::from))
         .collect()
 }
 

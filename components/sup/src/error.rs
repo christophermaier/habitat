@@ -104,6 +104,7 @@ impl SupError {
 #[derive(Debug)]
 pub enum Error {
     Departed,
+    BadCompositesPath(PathBuf, io::Error),
     BadDataFile(PathBuf, io::Error),
     BadDataPath(PathBuf, io::Error),
     BadDesiredState(String),
@@ -169,6 +170,13 @@ impl fmt::Display for SupError {
     // verbose on, and print it.
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let content = match self.err {
+            Error::BadCompositesPath(ref path, ref err) => {
+                format!(
+                    "Unable to create the composites directory '{}' ({})",
+                    path.display(),
+                    err
+                )
+            }
             Error::Departed => {
                 format!(
                     "This Supervisor has been manually departed.\n\nFor the safety of the system, this Supervisor cannot be started (if we did, we would risk the services on this machine behaving badly without our knowledge.) If you know that the services on this system are safe, and want them to rejoin the habitat ring, you need to:\n\n  rm -rf /hab/sup/default/MEMBER_ID /hab/sup/default/data\n\nThis will cause the Supervisor to join the ring as a new member.\n\nIf you are in doubt, it is better to consider the services managed by this Supervisor as unsafe to run."
@@ -335,6 +343,7 @@ impl fmt::Display for SupError {
 impl error::Error for SupError {
     fn description(&self) -> &str {
         match self.err {
+            Error::BadCompositesPath(_, _) => "Unable to create the composites directory",
             Error::Departed => "Supervisor has been manually departed",
             Error::BadDataFile(_, _) => "Unable to read or write to a data file",
             Error::BadDataPath(_, _) => "Unable to read or write to data directory",

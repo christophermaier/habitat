@@ -84,6 +84,7 @@ pub struct FsCfg {
 
     data_path: PathBuf,
     specs_path: PathBuf,
+    composites_path: PathBuf,
     member_id_file: PathBuf,
     proc_lock_file: PathBuf,
 }
@@ -100,6 +101,7 @@ impl FsCfg {
             census_data_path: data_path.join("census.dat"),
             services_data_path: data_path.join("services.dat"),
             specs_path: sup_svc_root.join("specs"),
+            composites_path: sup_svc_root.join("composites"),
             data_path: data_path,
             member_id_file: sup_svc_root.join(MEMBER_ID_FILE),
             proc_lock_file: sup_svc_root.join(PROC_LOCK_FILE),
@@ -396,6 +398,16 @@ impl Manager {
         if let Some(err) = fs::create_dir_all(&specs_path).err() {
             return Err(sup_error!(Error::BadSpecsPath(specs_path, err)));
         }
+
+        let composites_path = Self::composites_path(&state_path);
+        debug!(
+            "Creating composites directory: {}",
+            composites_path.display()
+        );
+        if let Some(err) = fs::create_dir_all(&composites_path).err() {
+            return Err(sup_error!(Error::BadCompositesPath(composites_path, err)));
+        }
+
         Ok(())
     }
 
@@ -413,6 +425,14 @@ impl Manager {
         T: AsRef<Path>,
     {
         state_path.as_ref().join("specs")
+    }
+
+    #[inline]
+    fn composites_path<T>(state_path: T) -> PathBuf
+    where
+        T: AsRef<Path>,
+    {
+        state_path.as_ref().join("composites")
     }
 
     fn state_path_from(cfg: &ManagerConfig) -> PathBuf {

@@ -98,6 +98,7 @@ pub struct Service {
     #[serde(rename = "process")]
     supervisor: Supervisor,
     svc_encrypted_password: Option<String>,
+    composite: Option<String>,
 }
 
 impl Service {
@@ -149,6 +150,7 @@ impl Service {
             config_from: spec.config_from,
             last_health_check: Instant::now() - *HEALTH_CHECK_INTERVAL,
             svc_encrypted_password: spec.svc_encrypted_password,
+            composite: spec.composite,
         })
     }
 
@@ -352,6 +354,9 @@ impl Service {
         spec.group = self.service_group.group().to_string();
         if let Some(appenv) = self.service_group.application_environment() {
             spec.application_environment = Some(appenv)
+        }
+        if let Some(ref composite) = self.composite {
+            spec.composite = Some(composite.clone())
         }
         spec.bldr_url = self.bldr_url.clone();
         spec.channel = self.channel.clone();

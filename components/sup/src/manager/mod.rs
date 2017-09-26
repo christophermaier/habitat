@@ -965,14 +965,16 @@ pub struct ServiceStatus {
     pub process: ProcessStatus,
     pub service_group: ServiceGroup,
     pub start_style: StartStyle,
+    pub composite: Option<String>,
 }
 
 impl fmt::Display for ServiceStatus {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
             f,
-            "{}, {}, group:{}, style:{}",
+            "{} ({}), {}, group:{}, style:{}",
             self.pkg.ident,
+            self.composite.as_ref().unwrap_or(&"standalone".to_string()),
             self.process,
             self.service_group,
             self.start_style

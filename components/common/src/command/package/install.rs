@@ -44,6 +44,7 @@ use std::result::Result as StdResult;
 use depot_client::{self, Client};
 use depot_client::Error::APIError;
 use hcore;
+use hcore::channel::STABLE_CHANNEL;
 use hcore::fs::{am_i_root, cache_key_path};
 use hcore::crypto::{artifact, SigKeyPair};
 use hcore::crypto::keys::parse_name_with_rev;
@@ -210,6 +211,7 @@ where
         fs_root_path.as_ref(),
         artifact_cache_path.as_ref(),
         &key_cache_path,
+        &channel,
     )?;
 
     match *install_source {
@@ -224,6 +226,7 @@ struct InstallTask<'a> {
     /// The path to the local artifact cache (e.g., /hab/cache/artifacts)
     artifact_cache_path: &'a Path,
     key_cache_path: &'a Path,
+    channel: &'a Option<&'a str>,
 }
 
 impl<'a> InstallTask<'a> {
@@ -234,12 +237,14 @@ impl<'a> InstallTask<'a> {
         fs_root_path: &'a Path,
         artifact_cache_path: &'a Path,
         key_cache_path: &'a Path,
+        channel: &'a Option<&'a str>,
     ) -> Result<Self> {
         Ok(InstallTask {
             depot_client: Client::new(url, product, version, Some(fs_root_path))?,
             fs_root_path: fs_root_path,
             artifact_cache_path: artifact_cache_path,
             key_cache_path: key_cache_path,
+            channel: channel,
         })
     }
 
@@ -400,32 +405,62 @@ impl<'a> InstallTask<'a> {
     fn install_package(&self, ui: &mut UI, ident: &PackageIdent) -> Result<PackageInstall> {
         let mut artifact = self.get_cached_artifact(ui, ident)?;
 
-        // Ensure that all transitive dependencies, as well as the
-        // original package itself, are cached locally.
-        let dependencies = artifact.tdeps()?;
-        let mut artifacts_to_install = Vec::with_capacity(dependencies.len() + 1);
-        for dependency in dependencies.iter() {
-            if self.installed_package(dependency).is_some() {
-                ui.status(Status::Using, dependency)?;
-            } else {
-                artifacts_to_install.push(self.get_cached_artifact(ui, dependency)?);
+        // TODO (CM): Determine if we're installing a composite or
+        // standalone package.
+        //
+        // If standalone, consult the TDEPS file to get a list of
+        // fully-qualified packages to install.
+        //
+        // If composite, consult the SERVICES file to figure out what
+        // services should be installed. If that's the case, we can
+        // just pas back up to the `from_ident` function to fully
+        // install each service.
+        match artifact.package_type()? {
+            PackageType::Standalone => {
+                // Ensure that all transitive dependencies, as well as the
+                // original package itself, are cached locally.
+                let dependencies = artifact.tdeps()?;
+                let mut artifacts_to_install = Vec::with_capacity(dependencies.len() + 1);
+                for dependency in dependencies.iter() {
+                    if self.installed_package(dependency).is_some() {
+                        ui.status(Status::Using, dependency)?;
+                    } else {
+                        artifacts_to_install.push(self.get_cached_artifact(ui, dependency)?);
+                    }
+                }
+                // The package we're actually trying to install goes last; we
+                // want to ensure that its dependencies get installed before
+                // it does.
+                artifacts_to_install.push(artifact);
+
+                // Ensure all uninstalled artifacts get installed
+                for artifact in artifacts_to_install.iter_mut() {
+                    self.unpack_artifact(ui, artifact)?;
+                }
+
+                ui.end(format!(
+                    "Install of {} complete with {} new packages installed.",
+                    ident,
+                    artifacts_to_install.len()
+                ))?;
             }
-        }
-        // The package we're actually trying to install goes last; we
-        // want to ensure that its dependencies get installed before
-        // it does.
-        artifacts_to_install.push(artifact);
+            PackageType::Composite => {
+                // Ugh, this is gross, but we need to do it until we
+                // just take a channel explicitly
+                let channel = self.channel.unwrap_or(STABLE_CHANNEL);
 
-        // Ensure all uninstalled artifacts get installed
-        for artifact in artifacts_to_install.iter_mut() {
-            self.unpack_artifact(ui, artifact)?;
-        }
+                let services = artifact.pkg_services()?;
+                for service in services {
+                    // Services aren't necessarily given as
+                    // fully-qualified identifiers, so we just pretend
+                    // like we're installing them "from the top" to
+                    // ensure a consistent experience
+                    self.from_ident(ui, service, Some(channel))?;
+                }
 
-        ui.end(format!(
-            "Install of {} complete with {} new packages installed.",
-            ident,
-            artifacts_to_install.len()
-        ))?;
+                self.unpack_artifact(ui, &mut artifact)?;
+            }        
+        }
 
         // Return the thing we just installed
         PackageInstall::load(ident, Some(self.fs_root_path)).map_err(Error::from)

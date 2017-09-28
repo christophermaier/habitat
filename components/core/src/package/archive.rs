@@ -61,6 +61,9 @@ lazy_static! {
         map.insert(MetaFile::Services,
                    Regex::new(&format!(r"^/?hab/pkgs/([^/]+)/([^/]+)/([^/]+)/([^/]+)/{}$",
                               MetaFile::Services)).unwrap());
+        map.insert(MetaFile::ResolvedServices,
+                   Regex::new(&format!(r"^/?hab/pkgs/([^/]+)/([^/]+)/([^/]+)/([^/]+)/{}$",
+                              MetaFile::ResolvedServices)).unwrap());
         map.insert(MetaFile::Manifest,
                    Regex::new(&format!(r"^/?hab/pkgs/([^/]+)/([^/]+)/([^/]+)/([^/]+)/{}$",
                               MetaFile::Manifest)).unwrap());
@@ -219,6 +222,10 @@ impl PackageArchive {
 
     pub fn pkg_services(&mut self) -> Result<Vec<PackageIdent>> {
         self.read_deps(MetaFile::Services)
+    }
+
+    pub fn resolved_services(&mut self) -> Result<Vec<PackageIdent>> {
+        self.read_deps(MetaFile::ResolvedServices)
     }
 
     pub fn target(&mut self) -> Result<PackageTarget> {

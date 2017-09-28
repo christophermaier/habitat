@@ -285,6 +285,7 @@ impl PackageArchive {
     fn read_deps(&mut self, file: MetaFile) -> Result<Vec<PackageIdent>> {
         let mut deps: Vec<PackageIdent> = vec![];
 
+        // TODO (CM): I might just be able to remove this check altogether
         // For now, all deps files but SERVICES need fully-qualified
         // package identifiers
         let must_be_fully_qualified = {

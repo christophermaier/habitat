@@ -10,7 +10,7 @@ pkg_services=(
     core/builder-api-proxy
     core/builder-datastore
     core/builder-jobsrv
-    core/builder-originsrv
+#    core/builder-originsrv
     core/builder-router
     core/builder-scheduler
     core/builder-sessionsrv
@@ -29,18 +29,18 @@ pkg_bind_map=(
     [core/builder-admin]="router:core/builder-router"
     [core/builder-admin-proxy]="http:core/builder-admin"
     [core/builder-jobsrv]="router:core/builder-router datastore:core/builder-datastore"
-    [core/builder-originsrv]="router:core/builder-router datastore:core/builder-datastore"
-    [core/builder-scheduler]="router:core/builder-router datastore:core/builder-datastore depot:core/builder-api"
+ #   [core/builder-originsrv]="router:core/builder-router datastore:core/builder-datastore"
+    [core/builder-scheduler]="router:core/builder-router datastore:core/builder-datastore"
     [core/builder-sessionsrv]="router:core/builder-router datastore:core/builder-datastore"
     [core/builder-worker]="jobsrv:core/builder-jobsrv depot:core/builder-api"
 )
 
-pkg_set_default=all
-pkg_sets=(
-  [all]="core/builder-admin core/builder-admin-proxy core/builder-api core/builder-api-proxy core/builder-datastore core/builder-jobsrv core/builder-originsrv core/builder-router core/builder-scheduler core/builder-sessionsrv core/builder-worker"
-  [frontend]="core/builder-api core/builder-api-proxy"
-  [admin]="core/builder-admin core/builder-admin-proxy"
-  [backend-services]="core/builder-jobsrv core/builder-originsrv core/builder-sessionsrv core/builder-sessionsrv"
-  [data]="core/builder-datastore"
-  [worker]="core/builder-worker"
-)
+# pkg_set_default=all
+# pkg_sets=(
+#   [all]="core/builder-admin core/builder-admin-proxy core/builder-api core/builder-api-proxy core/builder-datastore core/builder-jobsrv core/builder-originsrv core/builder-router core/builder-scheduler core/builder-sessionsrv core/builder-worker"
+#   [frontend]="core/builder-api core/builder-api-proxy"
+#   [admin]="core/builder-admin core/builder-admin-proxy"
+#   [backend-services]="core/builder-jobsrv core/builder-originsrv core/builder-sessionsrv core/builder-sessionsrv"
+#   [data]="core/builder-datastore"
+#   [worker]="core/builder-worker"
+# )

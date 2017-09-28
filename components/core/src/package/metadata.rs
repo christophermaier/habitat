@@ -213,7 +213,7 @@ impl fmt::Display for MetaFile {
 
 pub enum PackageType {
     Standalone,
-    Composite
+    Composite,
 }
 
 impl fmt::Display for PackageType {

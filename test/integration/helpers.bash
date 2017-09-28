@@ -35,6 +35,8 @@ jq=$(find_if_exists jq)
 # Custom Assertions
 ########################################################################
 
+load 'spec_assertions'
+
 assert_spec_exists_for() {
     local service_name=${1}
     assert_file_exist $(spec_file_for ${service_name})
@@ -62,7 +64,7 @@ assert_package_installed() {
 # Given a fully-qualified package identifer, assert that it and all
 # its transitive dependencies have been completely installed.
 assert_package_and_deps_installed() {
-    ident=${1}
+    local ident=${1}
     assert_package_installed "${ident}"
 
     tdeps_file="/hab/pkgs/${ident}/TDEPS"
@@ -354,6 +356,5 @@ service_directory_for() {
 # Returns the path to the named service's spec file.
 spec_file_for() {
     local service_name=${1}
-    echo "SFF: ${service_name}" >&2
     echo "/hab/sup/default/specs/${service_name}.spec"
 }

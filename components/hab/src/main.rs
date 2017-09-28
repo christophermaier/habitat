@@ -446,6 +446,9 @@ fn sub_pkg_install(ui: &mut UI, m: &ArgMatches) -> Result<()> {
             PRODUCT,
             VERSION,
             &*FS_ROOT,
+            // TODO (CM): This MAY be restating a default
+            // value... need to see if these FS roots evaluate to the
+            // same thing
             &cache_artifact_path(Some(&*FS_ROOT)),
         )?;
 

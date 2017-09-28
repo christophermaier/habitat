@@ -223,7 +223,17 @@ _validate_pkg_sets() {
 }
 
 # TODO (CM): Validate the default set is actually a set
-# TODO (CM): Do we default to everything being a set? Write that into the metadata file?
+# TODO (CM): Do we default to everything being a set? Write that into
+# the metadata file?
+#
+# YES, we should default to everything. Builder is special in that
+# it's one big system, as opposed to a service with its sidecars. In
+# the latter case, of course you'll want to run all of them at once;
+# why should you need to specify that?
+#
+# Maybe if you supply no sets, we default to everything. Adding sets
+# can come later.
+#
 # TODO (CM): Should all services be accounted for in the union of all sets?
 # TODO (CM): Should we allow one-member sets?
 

@@ -1,10 +1,10 @@
 web: support/builder_web.sh
 postgres: support/db/start.sh
-api: target/debug/bldr-api start --path /tmp/depot
+api: target/debug/bldr-api start --path /tmp/depot --config /home/maier/habitat/config_api.toml
 admin: target/debug/bldr-admin start
 router: target/debug/bldr-router start
-jobsrv: target/debug/bldr-jobsrv start
-scheduler: target/debug/bldr-scheduler start
-sessionsrv: target/debug/bldr-sessionsrv start
-originsrv: target/debug/bldr-originsrv start
-worker: target/debug/bldr-worker start
+jobsrv: target/debug/bldr-job-srv start --config /home/maier/habitat/config_jobsrv.toml
+scheduler: target/debug/bldr-scheduler start --config /home/maier/habitat/config_scheduler.toml
+sessionsrv: target/debug/bldr-session-srv start --config /home/maier/habitat/config_sessionsrv.toml
+originsrv: target/debug/bldr-origin-srv start
+worker: target/debug/bldr-worker start --config /home/maier/habitat/config_worker.toml

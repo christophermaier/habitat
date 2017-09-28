@@ -13,6 +13,7 @@
 // limitations under the License.
 
 pub mod hooks;
+mod composite_spec;
 mod config;
 mod health;
 mod package;
@@ -56,6 +57,7 @@ use util;
 pub use self::config::Cfg;
 pub use self::health::{HealthCheck, SmokeCheck};
 pub use self::package::Pkg;
+pub use self::composite_spec::CompositeSpec;
 pub use self::spec::{DesiredState, ServiceBind, ServiceSpec, StartStyle};
 pub use self::supervisor::ProcessState;
 
@@ -150,6 +152,7 @@ impl Service {
             config_from: spec.config_from,
             last_health_check: Instant::now() - *HEALTH_CHECK_INTERVAL,
             svc_encrypted_password: spec.svc_encrypted_password,
+            // TODO (CM): OMG I hate this... just store the spec directly
             composite: spec.composite,
         })
     }

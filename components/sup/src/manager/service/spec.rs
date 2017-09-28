@@ -111,7 +111,7 @@ pub struct ServiceSpec {
     pub start_style: StartStyle,
     pub svc_encrypted_password: Option<String>,
     // The name of the composite this service is a part of
-    pub composite: Option<String>,
+    pub composite: Option<String>, // TODO (CM): Other type instead?
 }
 
 impl ServiceSpec {

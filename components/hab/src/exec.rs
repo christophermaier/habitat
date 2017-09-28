@@ -53,6 +53,8 @@ where
         return Err(Error::ExecCommandNotFound(command));
     }
 
+    // TODO (CM): Does this need to be platform-aware? What does this
+    // do on Windows?
     let fs_root_path = Path::new("/");
     match PackageInstall::load_at_least(ident, None) {
         Ok(pi) => {
@@ -67,6 +69,8 @@ where
                 format!("package for {}", &ident),
             )?;
 
+            // Instead of `None`, this channel should be
+            // Some(STABLE_CHANNEL), and then we don't need an Option.
             common::command::package::install::start(
                 ui,
                 &default_bldr_url(),

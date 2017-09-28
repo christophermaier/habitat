@@ -4,6 +4,12 @@
 # executes the tests in that container, mounting the tests and Habitat
 # binaries as needed.
 
+if [ -z "${1}" ]; then
+    COMMAND="bats ."
+else
+    COMMAND="${1}"
+fi
+
 docker build -t hab-bats-cleanroom $(pwd)/test/integration
 
 docker run -it --rm \
@@ -14,4 +20,4 @@ docker run -it --rm \
        --env HAB_BIN_DIR=/bin \
        --workdir=/test \
        hab-bats-cleanroom \
-       bats .
+       "${COMMAND}"

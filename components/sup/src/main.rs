@@ -45,6 +45,8 @@ use hcore::crypto::dpapi::encrypt;
 use hcore::env as henv;
 use hcore::fs;
 use hcore::package::PackageIdent;
+use hcore::package::install::PackageInstall;
+use hcore::package::metadata::PackageType;
 use hcore::service::{ApplicationEnvironment, ServiceGroup};
 use hcore::url::default_bldr_url;
 use launcher_client::{LauncherCli, ERR_NO_RETRY_EXCODE, OK_NO_RETRY_EXCODE};
@@ -479,36 +481,43 @@ fn sub_load(m: &ArgMatches) -> Result<()> {
     }
     let cfg = mgrcfg_from_matches(m)?;
     let install_source = install_source_from_matches(m)?;
-    let ident = install_source.as_ref().clone();
 
-    let default_spec = ServiceSpec::default_for(ident);
-    let spec_file = Manager::spec_path_for(&cfg, &default_spec);
-    if let Ok(spec) = ServiceSpec::from_file(&spec_file) {
-        if !m.is_present("FORCE") {
-            return Err(sup_error!(Error::ServiceLoaded(spec.ident)));
-        }
+    // TODO (CM): need to handle --force flag! WRITE A TEST FOR IT,
+    // TOO!
+    //
+    // How does it differ for composites?
+
+    // let default_spec = ServiceSpec::default_for(ident);
+    // let spec_file = Manager::spec_path_for(&cfg, &default_spec);
+    // if let Ok(spec) = ServiceSpec::from_file(&spec_file) {
+    //     if !m.is_present("FORCE") {
+    //         return Err(sup_error!(Error::ServiceLoaded(spec.ident)));
+    //     }
+    // }
+
+    let bldr_url = bldr_url_from_matches(m);
+    let channel = channel_from_matches(m);
+    let installed_package = match util::pkg::installed(install_source.ident()) {
+        None => {
+            outputln!("Missing package for {}", install_source.ident());
+            util::pkg::install(&mut UI::default(), &bldr_url, &install_source, &channel)?,
+        Some(package) => package
+    };
+    let specs = specs_from_package(&installed_package, m)?;
+
+    // WHAT DO I WANT TO HAPPEN HERE?
+    //
+    // If the composite is on disk, do we fetch it again? (maybe for
+    // force we do, then we can then cascade the new specs down to the
+    // services)
+    //
+    // If it's not on disk, I want to just grab the package and figure
+    // out what specs *should* get generated, then save those.
+
+    for spec in specs.iter() {
+        Manager::save_spec_for(&cfg, spec)?;
+        outputln!("The {} service was successfully loaded", spec.ident);
     }
-    let mut spec = spec_from_matches(default_spec.ident, m)?;
-    spec.start_style = StartStyle::Persistent;
-
-    if let None = util::pkg::installed(&spec.ident) {
-        // While an InstallSource can be created from a string, that would
-        // permit the use of an ident or a file path; this command
-        // currently explicitly calls for an ident, so we generate the
-        // InstallSource directly from a valid PackageIdent instead.
-        let install_source = spec.ident.clone().into();
-
-        outputln!("Missing package for {}", &spec.ident);
-        util::pkg::install(
-            &mut UI::default(),
-            &spec.bldr_url,
-            &install_source,
-            &spec.channel,
-        )?;
-    }
-
-    Manager::save_spec_for(&cfg, &spec)?;
-    outputln!("The {} service was successfully loaded", spec.ident);
     Ok(())
 }
 
@@ -519,13 +528,46 @@ fn sub_unload(m: &ArgMatches) -> Result<()> {
     if m.is_present("NO_COLOR") {
         hcore::output::set_no_color(true);
     }
+
     let cfg = mgrcfg_from_matches(m)?;
+
+    // We create a spec in order to get the name of the package
+    // it's for. We could just as easily do this with the ident
+    // itself.
+    //
+    // I don't really like it, but you can use
+    // ServiceSpec::default_for(ident) and be fine. If we do that,
+    // though, we shouldn't use composite_specs_from_spec, I think.
     let ident = PackageIdent::from_str(m.value_of("PKG_IDENT").unwrap())?;
     let spec = spec_from_matches(ident, m)?;
-    let spec_file = Manager::spec_path_for(&cfg, &spec);
-    std::fs::remove_file(&spec_file).map_err(|err| {
-        sup_error!(Error::ServiceSpecFileIO(spec_file, err))
-    })
+
+    let specs: Vec<ServiceSpec>;
+    if m.is_present("COMPOSITE") {
+        // Really, though, I just need a list of PackageIdents for the
+        // services. As usual, though, I need access to the package
+        // contents, first.
+        //
+        // This here is a bit of overkill.
+        specs = util::pkg::composite_specs_from_spec(&mut UI::default(), &spec)?;
+    } else {
+        specs = vec![spec];
+    }
+
+    for spec in specs.iter() {
+        let spec_file = Manager::spec_path_for(&cfg, &spec);
+        outputln!("Unloading {:?}", spec_file);
+
+        // TODO (CM): This currently fails if any of the spec files
+        // don't exist.
+        //
+        // Should we check that they all exist first, treat failure to
+        // remove as "OK", something else?
+        std::fs::remove_file(&spec_file).map_err(|err| {
+            sup_error!(Error::ServiceSpecFileIO(spec_file, err))
+        })?;
+    }
+
+    Ok(())
 }
 
 fn sub_run(m: &ArgMatches, launcher: LauncherCli) -> Result<()> {
@@ -670,6 +712,13 @@ fn sub_status(m: &ArgMatches) -> Result<()> {
     }
     Ok(())
 }
+
+
+// TODO (CM): to stop a composite, we stop all components. This means
+// we need to know which components to target. Which means we need to
+// retrieve the current list of services. Which means we need to store
+// a composites list somewhere
+
 
 fn sub_stop(m: &ArgMatches) -> Result<()> {
     if m.is_present("VERBOSE") {
@@ -819,23 +868,55 @@ fn install_source_from_matches(m: &ArgMatches) -> Result<InstallSource> {
 
 fn spec_from_matches(ident: PackageIdent, m: &ArgMatches) -> Result<ServiceSpec> {
     let mut spec = ServiceSpec::default_for(ident);
+
+    set_group_from_matches(&mut spec, m);
+    set_app_env_from_matches(&mut spec, m)?;
+    set_bldr_url_from_matches(&mut spec, m);
+    set_channel_from_matches(&mut spec, m);
+    set_topology_from_matches(&mut spec, m)?;
+    set_strategy_from_matches(&mut spec, m)?;
+    set_binds_from_matches(&mut spec, m)?;
+    set_config_from_matches(&mut spec, m)?;
+
+    set_spec_password(m, &mut spec)?;
+
+    Ok(spec)
+}
+
+fn set_group_from_matches(spec: &mut ServiceSpec, m: &ArgMatches) {
     if let Some(group) = m.value_of("GROUP") {
         spec.group = group.to_string();
     }
+}
+
+fn set_app_env_from_matches(spec: &mut ServiceSpec, m: &ArgMatches) -> Result<()> {
     if let (Some(app), Some(env)) = (m.value_of("APPLICATION"), m.value_of("ENVIRONMENT")) {
         spec.application_environment = Some(ApplicationEnvironment::new(
             app.to_string(),
             env.to_string(),
         )?);
     }
+    Ok(())
+}
+fn set_bldr_url_from_matches(spec: &mut ServiceSpec, m: &ArgMatches) {
     spec.bldr_url = bldr_url_from_matches(m);
+}
+fn set_channel_from_matches(spec: &mut ServiceSpec, m: &ArgMatches) {
     spec.channel = channel_from_matches(m);
+}
+fn set_topology_from_matches(spec: &mut ServiceSpec, m: &ArgMatches) -> Result<()> {
     if let Some(topology) = m.value_of("TOPOLOGY") {
         spec.topology = Topology::from_str(topology)?;
     }
+    Ok(())
+}
+fn set_strategy_from_matches(spec: &mut ServiceSpec, m: &ArgMatches) -> Result<()> {
     if let Some(ref strategy) = m.value_of("STRATEGY") {
         spec.update_strategy = UpdateStrategy::from_str(strategy)?;
     }
+    Ok(())
+}
+fn set_binds_from_matches(spec: &mut ServiceSpec, m: &ArgMatches) -> Result<()> {
     if let Some(bind_strs) = m.values_of("BIND") {
         let mut binds = Vec::new();
         for bind_str in bind_strs {
@@ -843,6 +924,10 @@ fn spec_from_matches(ident: PackageIdent, m: &ArgMatches) -> Result<ServiceSpec>
         }
         spec.binds = binds;
     }
+    Ok(())
+}
+
+fn set_config_from_matches(spec: &mut ServiceSpec, m: &ArgMatches) -> Result<()> {
     if let Some(ref config_from) = m.value_of("CONFIG_DIR") {
         spec.config_from = Some(PathBuf::from(config_from));
         outputln!("");
@@ -855,9 +940,7 @@ fn spec_from_matches(ident: PackageIdent, m: &ArgMatches) -> Result<ServiceSpec>
         );
         outputln!("");
     }
-    set_spec_password(m, &mut spec)?;
-
-    Ok(spec)
+    Ok(())
 }
 
 #[cfg(target_os = "windows")]
@@ -930,4 +1013,92 @@ fn enable_features_from_env() {
         }
         outputln!("The Supervisor will start now, enjoy!");
     }
+}
+
+/// Given an installed package, generate a spec (or specs, in the case
+/// of composite packages!) from it and the arguments passed in on the
+/// command line.
+fn specs_from_package(package: &PackageInstall, m: &ArgMatches) -> Result<Vec<ServiceSpec>> {
+    let specs = match package.pkg_type()? {
+        PackageType::Standalone => {
+            let spec = spec_from_matches(package.ident().clone(), m)?;
+            vec![spec]
+        }
+        PackageType::Composite => {
+            let composite_name = &package.ident().name;
+
+            // All specs in a composite currently share a lot of the
+            // same information. Here, we create a "base spec" that we
+            // can clone and further customize for each individual
+            // service as needed.
+            //
+            // (Note that once we're done setting it up, base_spec is
+            // intentionally immutable.)
+            let base_spec = {
+                let mut spec = ServiceSpec::default();
+                set_group_from_matches(&mut spec, m);
+                set_app_env_from_matches(&mut spec, m)?;
+                set_bldr_url_from_matches(&mut spec, m);
+                set_channel_from_matches(&mut spec, m);
+                set_topology_from_matches(&mut spec, m)?;
+                set_strategy_from_matches(&mut spec, m)?;
+
+                // TODO (CM): does this also need to be the same for everything?
+                set_spec_password(m, &mut spec)?;
+
+                // TODO (CM): Might need to tweak this for the `hab
+                // svc start` case?
+                spec.start_style = StartStyle::Persistent;
+                spec.composite = Some(composite_name.to_string());
+                spec
+            };
+
+            let services = package.pkg_services()?;
+            let bind_map = package.bind_map()?;
+
+            let mut specs: Vec<ServiceSpec> = Vec::with_capacity(services.len());
+            for service in services {
+                outputln!("Found a service: {:?}", service);
+                let mut spec = base_spec.clone();
+                spec.ident = service;
+
+                // What else do we need to customize?
+                // - topology?
+                // - update strategy
+                // - optional binds? (we don't even have those yet)
+                // - desired state?
+                // - start style?
+
+                // TODO (CM): Not sure if config has meaning for composites?
+                // set_config_from_matches(&mut spec, m)?;
+                if let Some(bind_mappings) = bind_map.get(&spec.ident) {
+                    let mut service_binds = Vec::with_capacity(bind_mappings.len());
+
+                    // Turn each BindMapping into a ServiceBind and
+                    // add them to the spec
+                    for bind_mapping in bind_mappings.iter() {
+                        // TODO (CM): Note that this does nothing about
+                        // app/env or organization :(
+                        let service_bind: ServiceBind = format!(
+                            "{}:{}.{}",
+                            &bind_mapping.bind_name,
+                            &bind_mapping.satisfying_service.name,
+                            &spec.group
+                        ).parse()?;
+
+                        service_binds.push(service_bind);
+                    }
+                    spec.binds = service_binds;
+                }
+
+                // TODO (CM) 2017-09-07
+                // Add a unit test for reading TYPE (ensure
+                // default value when file isn't present!), and
+                // SERVICES (they can have non-fully-qualified ids)
+                specs.push(spec);
+            }
+            specs
+        }
+    };
+    Ok(specs)
 }

@@ -48,7 +48,7 @@ use serde;
 use serde_json;
 use time::{self, Timespec, Duration as TimeDuration};
 
-pub use self::service::{Service, ServiceSpec, UpdateStrategy, Topology};
+pub use self::service::{CompositeSpec, Service, ServiceBind, ServiceSpec, UpdateStrategy, Topology};
 pub use self::sys::Sys;
 use self::self_updater::{SUP_PKG_IDENT, SelfUpdater};
 use self::service::{DesiredState, Pkg, ProcessState, StartStyle};
@@ -307,6 +307,8 @@ impl Manager {
             launcher: launcher,
             services: services,
             watcher: SpecWatcher::run(&fs_cfg.specs_path)?,
+
+            // TODO (CM): No watcher for the composites path... yet?
             fs_cfg: Arc::new(fs_cfg),
             organization: cfg.organization,
             service_states: HashMap::new(),
@@ -354,9 +356,18 @@ impl Manager {
         Self::specs_path(&Self::state_path_from(cfg)).join(spec.file_name())
     }
 
+    pub fn composite_path_for(cfg: &ManagerConfig, spec: &CompositeSpec) -> PathBuf {
+        Self::composites_path(&Self::state_path_from(cfg)).join(spec.file_name())
+    }
+
     pub fn save_spec_for(cfg: &ManagerConfig, spec: &ServiceSpec) -> Result<()> {
         spec.to_file(Self::spec_path_for(cfg, spec))
     }
+
+    pub fn save_composite_spec_for(cfg: &ManagerConfig, spec: &CompositeSpec) -> Result<()> {
+        spec.to_file(Self::composite_path_for(cfg, spec))
+    }
+
 
     fn clean_dirty_state<T>(state_path: T) -> Result<()>
     where
@@ -460,6 +471,7 @@ impl Manager {
             self.fs_cfg.clone(),
             self.organization.as_ref().map(|org| &**org),
         ) {
+
             Ok(service) => service,
             Err(err) => {
                 outputln!("Unable to start {}, {}", &spec.ident, err);

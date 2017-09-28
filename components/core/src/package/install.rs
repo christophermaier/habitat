@@ -559,7 +559,6 @@ impl PackageInstall {
     ///
     /// # Failures
     ///
-    /// * Metafile could not be found
     /// * Contents of the metafile could not be read
     /// * Contents of the metafile are unreadable or malformed
     fn read_deps(&self, file: MetaFile) -> Result<Vec<PackageIdent>> {

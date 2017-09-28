@@ -49,6 +49,7 @@ use hcore::fs::{am_i_root, cache_key_path};
 use hcore::crypto::{artifact, SigKeyPair};
 use hcore::crypto::keys::parse_name_with_rev;
 use hcore::package::{Identifiable, PackageArchive, PackageIdent, Target, PackageInstall};
+use hcore::package::metadata::PackageType;
 use hyper::status::StatusCode;
 
 use error::{Error, Result};
@@ -71,6 +72,7 @@ pub const RETRY_WAIT: u64 = 3000;
 /// In other words, you are probably more interested in the
 /// `InstallSource` enum; this struct is just an implementation
 /// detail.
+#[derive(Debug)]
 pub struct LocalArchive {
     // In an ideal world, we would just implement `InstallSource` in
     // terms of a `PackageArchive` directly, since that can provide
@@ -93,6 +95,7 @@ pub struct LocalArchive {
 }
 
 /// Encapsulate all possible sources we can install packages from.
+#[derive(Debug)]
 pub enum InstallSource {
     /// We can install from a package identifier
     Ident(PackageIdent),
@@ -174,6 +177,8 @@ impl AsRef<PackageIdent> for InstallSource {
 // TODO (CM): Consider passing in a configured depot client instead of
 // product / version... That might make it easier to share with the
 // `sup` crate
+// TODO (CM): is channel obeyed for dependencies? Oh, that's
+// interesting for composites...
 pub fn start<P1, P2>(
     ui: &mut UI,
     url: &str,
@@ -323,6 +328,9 @@ impl<'a> InstallTask<'a> {
                     }
                     Err(e) => {
                         debug!("Failed to get channel list: {:?}", e);
+                        // TODO (CM): Do we really want to return an
+                        // error here? Because we couldn't output a
+                        // warning message?
                         return Err(Error::ChannelNotFound);
                     }
                 };
@@ -403,6 +411,7 @@ impl<'a> InstallTask<'a> {
     /// re-downloaded. Any dependencies of the package that are not
     /// installed will be re-cached (as needed) and installed.
     fn install_package(&self, ui: &mut UI, ident: &PackageIdent) -> Result<PackageInstall> {
+        // TODO (CM): rename artifact to archive
         let mut artifact = self.get_cached_artifact(ui, ident)?;
 
         // TODO (CM): Determine if we're installing a composite or
@@ -447,15 +456,20 @@ impl<'a> InstallTask<'a> {
             PackageType::Composite => {
                 // Ugh, this is gross, but we need to do it until we
                 // just take a channel explicitly
-                let channel = self.channel.unwrap_or(STABLE_CHANNEL);
+                //                let channel = self.channel.unwrap_or(STABLE_CHANNEL);
 
-                let services = artifact.pkg_services()?;
+                let services = artifact.resolved_services()?;
                 for service in services {
-                    // Services aren't necessarily given as
-                    // fully-qualified identifiers, so we just pretend
-                    // like we're installing them "from the top" to
-                    // ensure a consistent experience
-                    self.from_ident(ui, service, Some(channel))?;
+                    // We don't track the transitive dependencies of
+                    // all services at the composite level, because
+                    // each service itself does that. Thus, we need to
+                    // install them just like we would if we weren't
+                    // in a composite.
+
+                    // I don't think we really need a channel down
+                    // here, as all these identifiers will be
+                    // fully-qualified, though we should verify that.
+                    self.from_ident(ui, service, None)?;
                 }
 
                 self.unpack_artifact(ui, &mut artifact)?;
@@ -509,6 +523,8 @@ impl<'a> InstallTask<'a> {
         PackageInstall::load(ident, Some(self.fs_root_path)).ok()
     }
 
+    // TODO (CM): This could return a plain bool IF we could ensure
+    // above that the package identifier is FULLY QUALIFIED
     fn is_artifact_cached(&self, ident: &PackageIdent) -> Result<bool> {
         Ok(self.cached_artifact_path(ident)?.is_file())
     }
@@ -570,6 +586,7 @@ impl<'a> InstallTask<'a> {
     }
 
     /// Copies the artifact to the local artifact cache directory
+    // TODO (CM): Oh, we could just pass in the LocalArchive
     fn store_artifact_in_cache(&self, ident: &PackageIdent, artifact_path: &Path) -> Result<()> {
         let cache_path = self.cached_artifact_path(ident)?;
         fs::create_dir_all(self.artifact_cache_path)?;

@@ -48,15 +48,14 @@ setup() {
     assert_spec_exists_for redis
 }
 
-@test "CANNOT load a service from hart file" {
+@test "load a service from hart file" {
     # First, grab a hart file!
     desired_version="core/redis/3.2.4/20170514150022"
     hart_path=$(download_hart_for "${desired_version}")
     reset_hab_root
 
     run ${hab} svc load "${hart_path}"
-    assert_failure
-
-    [[ "$output" =~ "Installing ${hart_path} from channel 'stable'" ]]
-    [[ "$output" =~ "Package not found" ]]
+    assert_success
+    assert_package_and_deps_installed "${desired_version}"
+    assert_spec_exists_for redis
 }

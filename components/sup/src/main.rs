@@ -157,7 +157,9 @@ fn cli<'a, 'b>() -> App<'a, 'b> {
                 artifact. Services started in this manner will persist through Supervisor \
                 restarts.")
             (aliases: &["lo", "loa"])
-            (@arg PKG_IDENT: +required +takes_value "A Habitat package identifier (ex: core/redis)")
+            (@arg PKG_IDENT_OR_ARTIFACT: +required +takes_value
+                "A Habitat package identifier (ex: core/redis) or filepath to a Habitat Artifact \
+                (ex: /home/core-redis-3.0.7-21120102031201-x86_64-linux.hart)")
             (@arg NAME: --("override-name") +takes_value
                 "The name for the state directory if there is more than one Supervisor running \
                 [default: default]")
@@ -316,7 +318,9 @@ fn cli<'a, 'b>() -> App<'a, 'b> {
                 artifact. Services started in this manner will persist through Supervisor \
                 restarts.")
             (aliases: &["lo", "loa"])
-            (@arg PKG_IDENT: +required +takes_value "A Habitat package identifier (ex: core/redis)")
+            (@arg PKG_IDENT_OR_ARTIFACT: +required +takes_value
+                "A Habitat package identifier (ex: core/redis) or filepath to a Habitat Artifact \
+                (ex: /home/core-redis-3.0.7-21120102031201-x86_64-linux.hart)")
             (@arg NAME: --("override-name") +takes_value
                 "The name for the state directory if there is more than one Supervisor running \
                 [default: default]")
@@ -474,8 +478,8 @@ fn sub_load(m: &ArgMatches) -> Result<()> {
         hcore::output::set_no_color(true);
     }
     let cfg = mgrcfg_from_matches(m)?;
-
-    let ident = PackageIdent::from_str(m.value_of("PKG_IDENT").unwrap())?;
+    let install_source = install_source_from_matches(m)?;
+    let ident = install_source.as_ref().clone();
 
     let default_spec = ServiceSpec::default_for(ident);
     let spec_file = Manager::spec_path_for(&cfg, &default_spec);
@@ -558,9 +562,7 @@ fn sub_start(m: &ArgMatches, launcher: LauncherCli) -> Result<()> {
         ui.br()?;
     }
 
-    // PKG_IDENT_OR_ARTIFACT is required, so unwrap() is safe here
-    let ident_or_artifact = m.value_of("PKG_IDENT_OR_ARTIFACT").unwrap();
-    let install_source: InstallSource = ident_or_artifact.parse()?;
+    let install_source = install_source_from_matches(m)?;
     let ident: &PackageIdent = install_source.as_ref();
 
     // NOTE: As coded, if you try to start a service from a hart file,
@@ -804,6 +806,15 @@ fn channel_from_matches(matches: &ArgMatches) -> String {
         .value_of("CHANNEL")
         .and_then(|c| Some(c.to_string()))
         .unwrap_or(channel::default())
+}
+
+
+fn install_source_from_matches(m: &ArgMatches) -> Result<InstallSource> {
+    // PKG_IDENT_OR_ARTIFACT is required in subcommands that use it,
+    // so unwrap() is safe here.
+    let ident_or_artifact = m.value_of("PKG_IDENT_OR_ARTIFACT").unwrap();
+    let install_source: InstallSource = ident_or_artifact.parse()?;
+    Ok(install_source)
 }
 
 fn spec_from_matches(ident: PackageIdent, m: &ArgMatches) -> Result<ServiceSpec> {

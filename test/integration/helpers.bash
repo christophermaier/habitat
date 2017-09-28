@@ -35,8 +35,6 @@ jq=$(find_if_exists jq)
 # Custom Assertions
 ########################################################################
 
-load 'spec_assertions'
-
 assert_spec_exists_for() {
     local service_name=${1}
     assert_file_exist $(spec_file_for ${service_name})
@@ -88,6 +86,61 @@ assert_service_running() {
     assert_file_exist "$(spec_file_for ${service_name})"
     assert_file_exist "$(service_directory_for ${service_name})"
     assert_equal $(current_running_version_for "${service_name}") "${ident}"
+}
+
+# Extracts a value from the given service's spec file and asserts that
+# its value is as expected.
+assert_spec_value() {
+    local service=${1}
+    local key=${2}
+    local expected=${3}
+
+    local spec=$(spec_file_for ${service})
+    run grep ${key} ${spec}
+    assert_success
+
+    assert_equal "${output}" "${key} = \"${expected}\""
+}
+
+# All loaded composites currently write out a spec for themselves, the
+# contents of which are always deterministic, given the identifier for
+# the composite.
+assert_composite_spec() {
+    local composite_ident=${1} # fully-qualified
+    local composite_name=$(name_from_ident "${composite_ident}")
+
+    local composite_spec=$(composite_spec_file_for "${composite_name}")
+    assert_file_exist "${composite_spec}"
+    assert_composite_spec_value "${composite_name}" ident "${composite_ident}"
+}
+
+# Just like `assert_spec_value`, but for composites.
+# TODO (CM): Consolidate the two functions eventually
+assert_composite_spec_value() {
+    local composite=${1}
+    local key=${2}
+    local expected=${3}
+
+    local spec=$(composite_spec_file_for ${composite})
+    run grep ${key} ${spec}
+    assert_success
+
+    assert_equal "${output}" "${key} = \"${expected}\""
+}
+
+# When installing a composite, assert that every service described in
+# its RESOLVED_SERVICES file has been fully installed.
+assert_composite_and_services_are_installed() {
+    local composite_ident=${1} # fully-qualified
+
+    assert_package_installed "${composite_ident}"
+
+    local resolved_services_file="/hab/pkgs/${composite_ident}/RESOLVED_SERVICES"
+    assert_file_exist "${resolved_services_file}"
+
+    for service in $(cat "${resolved_services_file}"); do
+        assert_package_and_deps_installed "${service}"
+    done
 }
 
 # Useful Setup / Teardown Functions
@@ -357,4 +410,31 @@ service_directory_for() {
 spec_file_for() {
     local service_name=${1}
     echo "/hab/sup/default/specs/${service_name}.spec"
+}
+
+
+
+# Given a package identifier, return the 'name' portion of it
+name_from_ident() {
+    local ident=${1}
+    declare -a parsed
+    IFS='/' read -r -a parsed <<< "${ident}"
+    echo "${parsed[1]}"
+}
+
+# Returns the path for the named composite's spec file.
+composite_spec_file_for() {
+    local composite_name=${1}
+    echo "/hab/sup/default/composites/${composite_name}.spec"
+}
+
+# Return the identifiers the composite manages. Note that these
+# identifiers are the ones that will appear in the spec files, and DO
+# NOT need to be fully-qualified!
+services_for_composite() {
+    local composite_ident=${1} # fully-qualified
+    local services_file="/hab/pkgs/${composite_ident}/SERVICES"
+    assert_file_exist "${services_file}"
+
+    cat "${services_file}"
 }

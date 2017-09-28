@@ -40,8 +40,9 @@ teardown() {
 
     assert_composite_and_services_are_installed "${composite_ident}"
 
+    assert_composite_spec "${composite_ident}"
     for service in $(services_for_composite "${composite_ident}"); do
-        service_name="${service##core/}"
+        service_name=$(name_from_ident "${service}")
         assert_spec_exists_for "${service_name}"
 
         assert_spec_value "${service_name}" ident "${service}"

@@ -60,7 +60,7 @@ use sup::command;
 use sup::http_gateway;
 use sup::manager::{Manager, ManagerConfig};
 use sup::manager::service::{DesiredState, ServiceBind, Topology, UpdateStrategy};
-use sup::manager::service::{ServiceSpec, StartStyle};
+use sup::manager::service::{CompositeSpec, ServiceSpec, StartStyle};
 use sup::util;
 
 /// Our output key
@@ -513,6 +513,14 @@ fn sub_load(m: &ArgMatches) -> Result<()> {
     //
     // If it's not on disk, I want to just grab the package and figure
     // out what specs *should* get generated, then save those.
+
+    // If this is an error, then it wasn't a composite :P
+    // TODO (CM): Is there a better place to put this / better way to
+    // express this? I'd like to keep as much special logic out of
+    // this as possible...
+    if let Ok(composite_spec) = CompositeSpec::from_package_install(&installed_package) {
+        Manager::save_composite_spec_for(&cfg, &composite_spec)?;
+    };
 
     for spec in specs.iter() {
         Manager::save_spec_for(&cfg, spec)?;

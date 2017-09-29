@@ -182,6 +182,36 @@ reset_supervisor() {
     rm -Rf /hab/sup/*
 }
 
+# Use this in your setup function to skip all but the indicated test.
+# Useful for working on one test in isolation, since running them all
+# starts to be time-consuming.
+#
+# Pass the description of the test you want to run. That is, if you
+# have a test like this:
+#
+#     @test "this is my sweet, sweet test" {
+#         # make some assertions
+#     }
+#
+# then you would have a setup function like this:
+#
+#     setup() {
+#         run_only_test "this is my sweet, sweet test"
+#         # ...
+#     }
+#
+# and that's the only test in the entire file that will run.
+#
+# Useful for working on new tests, but remember to remove the call
+# before you commit!
+#
+# Stolen and modified from https://github.com/sstephenson/bats/issues/164
+run_only_test() {
+    if [ "$BATS_TEST_DESCRIPTION" != "$1" ]; then
+        skip
+    fi
+}
+
 # Helper Functions
 ########################################################################
 

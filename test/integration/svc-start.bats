@@ -17,6 +17,15 @@ teardown() {
     latest_redis=$(latest_from_builder core/redis stable)
     assert_package_and_deps_installed "${latest_redis}"
     assert_service_running "${latest_redis}"
+
+    assert_spec_value redis ident core/redis
+    assert_spec_value redis group default
+    assert_spec_value redis start_style transient
+    assert_spec_value redis channel stable
+    assert_spec_value redis topology standalone
+    assert_spec_value redis update_strategy none
+    assert_spec_value redis desired_state up
+    assert_spec_value redis bldr_url "https://bldr.habitat.sh"
 }
 
 @test "start a service: origin/name/version" {
@@ -26,6 +35,15 @@ teardown() {
     latest_redis=$(latest_from_builder core/redis/3.2.4 stable)
     assert_package_and_deps_installed "${latest_redis}"
     assert_service_running "${latest_redis}"
+
+    assert_spec_value redis ident core/redis/3.2.4
+    assert_spec_value redis group default
+    assert_spec_value redis start_style transient
+    assert_spec_value redis channel stable
+    assert_spec_value redis topology standalone
+    assert_spec_value redis update_strategy none
+    assert_spec_value redis desired_state up
+    assert_spec_value redis bldr_url "https://bldr.habitat.sh"
 }
 
 @test "start a service: origin/name/version/release" {
@@ -35,6 +53,15 @@ teardown() {
 
     assert_package_and_deps_installed "${desired_version}"
     assert_service_running "${desired_version}"
+
+    assert_spec_value redis ident "${desired_version}"
+    assert_spec_value redis group default
+    assert_spec_value redis start_style transient
+    assert_spec_value redis channel stable
+    assert_spec_value redis topology standalone
+    assert_spec_value redis update_strategy none
+    assert_spec_value redis desired_state up
+    assert_spec_value redis bldr_url "https://bldr.habitat.sh"
 }
 
 @test "start a service: pre-installed" {
@@ -63,4 +90,14 @@ teardown() {
 
     assert_package_and_deps_installed "${desired_version}"
     assert_service_running "${desired_version}"
+
+    assert_spec_value redis ident "${desired_version}"
+    assert_spec_value redis group default
+    assert_spec_value redis start_style transient
+    assert_spec_value redis channel stable
+    assert_spec_value redis topology standalone
+    assert_spec_value redis update_strategy none
+    assert_spec_value redis desired_state up
+    assert_spec_value redis bldr_url "https://bldr.habitat.sh"
+
 }

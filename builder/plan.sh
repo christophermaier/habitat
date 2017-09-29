@@ -1,20 +1,20 @@
 pkg_origin="core"
-pkg_name="builder"
+pkg_name="builder-tiny"
 pkg_type="composite"
 pkg_version="1.0.0"
 
 pkg_services=(
-    core/builder-admin
-    core/builder-admin-proxy
+    # core/builder-admin
+    # core/builder-admin-proxy
     core/builder-api
     core/builder-api-proxy
-    core/builder-datastore
-    core/builder-jobsrv
+#    core/builder-datastore
+#    core/builder-jobsrv
 #    core/builder-originsrv
     core/builder-router
-    core/builder-scheduler
-    core/builder-sessionsrv
-    core/builder-worker
+ #   core/builder-scheduler
+#    core/builder-sessionsrv
+#    core/builder-worker
 )
 
 # TODO (CM): So here, we probably want the keys to be
@@ -26,14 +26,14 @@ pkg_services=(
 pkg_bind_map=(
     [core/builder-api-proxy]="http:core/builder-api"
     [core/builder-api]="router:core/builder-router"
-    [core/builder-admin]="router:core/builder-router"
-    [core/builder-admin-proxy]="http:core/builder-admin"
-    [core/builder-jobsrv]="router:core/builder-router datastore:core/builder-datastore"
- #   [core/builder-originsrv]="router:core/builder-router datastore:core/builder-datastore"
-    [core/builder-scheduler]="router:core/builder-router datastore:core/builder-datastore"
-    [core/builder-sessionsrv]="router:core/builder-router datastore:core/builder-datastore"
-    [core/builder-worker]="jobsrv:core/builder-jobsrv depot:core/builder-api"
-)
+ #    [core/builder-admin]="router:core/builder-router"
+#     [core/builder-admin-proxy]="http:core/builder-admin"
+#     [core/builder-jobsrv]="router:core/builder-router datastore:core/builder-datastore"
+#  #   [core/builder-originsrv]="router:core/builder-router datastore:core/builder-datastore"
+#     [core/builder-scheduler]="router:core/builder-router datastore:core/builder-datastore"
+#     [core/builder-sessionsrv]="router:core/builder-router datastore:core/builder-datastore"
+#     [core/builder-worker]="jobsrv:core/builder-jobsrv depot:core/builder-api"
+ )
 
 # pkg_set_default=all
 # pkg_sets=(

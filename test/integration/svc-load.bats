@@ -15,6 +15,15 @@ setup() {
 
     # TODO: Should we test that the service is running? If so, need to sleep
     assert_spec_exists_for redis
+
+    assert_spec_value redis ident core/redis
+    assert_spec_value redis group default
+    assert_spec_value redis start_style persistent
+    assert_spec_value redis channel stable
+    assert_spec_value redis topology standalone
+    assert_spec_value redis update_strategy none
+    assert_spec_value redis desired_state up
+    assert_spec_value redis bldr_url "https://bldr.habitat.sh"
 }
 
 @test "load a service with version" {
@@ -24,6 +33,15 @@ setup() {
     latest_redis=$(latest_from_builder core/redis stable)
     assert_package_and_deps_installed "${latest_redis}"
     assert_spec_exists_for redis
+
+    assert_spec_value redis ident core/redis/3.2.4
+    assert_spec_value redis group default
+    assert_spec_value redis start_style persistent
+    assert_spec_value redis channel stable
+    assert_spec_value redis topology standalone
+    assert_spec_value redis update_strategy none
+    assert_spec_value redis desired_state up
+    assert_spec_value redis bldr_url "https://bldr.habitat.sh"
 }
 
 @test "load a service from a fully-qualified identifier" {
@@ -33,6 +51,15 @@ setup() {
 
     assert_package_and_deps_installed "${desired_version}"
     assert_spec_exists_for redis
+
+    assert_spec_value redis ident "${desired_version}"
+    assert_spec_value redis group default
+    assert_spec_value redis start_style persistent
+    assert_spec_value redis channel stable
+    assert_spec_value redis topology standalone
+    assert_spec_value redis update_strategy none
+    assert_spec_value redis desired_state up
+    assert_spec_value redis bldr_url "https://bldr.habitat.sh"
 }
 
 @test "load a service loads from installed package" {
@@ -58,4 +85,71 @@ setup() {
     assert_success
     assert_package_and_deps_installed "${desired_version}"
     assert_spec_exists_for redis
+
+    assert_spec_value redis ident "${desired_version}"
+    assert_spec_value redis group default
+    assert_spec_value redis start_style persistent
+    assert_spec_value redis channel stable
+    assert_spec_value redis topology standalone
+    assert_spec_value redis update_strategy none
+    assert_spec_value redis desired_state up
+    assert_spec_value redis bldr_url "https://bldr.habitat.sh"
+}
+
+@test "load a new service configuration with --force" {
+    run ${hab} svc load core/redis
+    assert_success
+
+    # Assert the default values in the service spec
+    assert_spec_value redis ident core/redis
+    assert_spec_value redis group default
+    assert_spec_value redis start_style persistent
+    assert_spec_value redis channel stable
+    assert_spec_value redis topology standalone
+    assert_spec_value redis update_strategy none
+    assert_spec_value redis desired_state up
+    assert_spec_value redis bldr_url "https://bldr.habitat.sh"
+
+    # Now, "reload" and change a few settings (chosen here arbitrarily)
+    run ${hab} svc load --force --channel=unstable --strategy=at-once core/redis
+    assert_success
+
+    # Assert the spec values after the update
+    assert_spec_value redis ident core/redis
+    assert_spec_value redis group default
+    assert_spec_value redis start_style persistent
+    assert_spec_value redis channel unstable # <-- changed!
+    assert_spec_value redis topology standalone
+    assert_spec_value redis update_strategy at-once # <-- changed!
+    assert_spec_value redis desired_state up
+    assert_spec_value redis bldr_url "https://bldr.habitat.sh"
+}
+
+@test "loading an already loaded service without --force is an error" {
+    run ${hab} svc load core/redis
+    assert_success
+
+    # Assert the contents of the spec file; we'll compare again later
+    assert_spec_value redis ident core/redis
+    assert_spec_value redis group default
+    assert_spec_value redis start_style persistent
+    assert_spec_value redis channel stable
+    assert_spec_value redis topology standalone
+    assert_spec_value redis update_strategy none
+    assert_spec_value redis desired_state up
+    assert_spec_value redis bldr_url "https://bldr.habitat.sh"
+
+    # Now, try to load again, but without --force
+    run ${hab} svc load --channel=unstable --strategy=at-once core/redis
+    assert_failure
+
+    # Check that the spec file values didn't change
+    assert_spec_value redis ident core/redis
+    assert_spec_value redis group default
+    assert_spec_value redis start_style persistent
+    assert_spec_value redis channel stable
+    assert_spec_value redis topology standalone
+    assert_spec_value redis update_strategy none
+    assert_spec_value redis desired_state up
+    assert_spec_value redis bldr_url "https://bldr.habitat.sh"
 }

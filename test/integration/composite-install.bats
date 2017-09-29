@@ -57,6 +57,16 @@ composite_name="builder-tiny"
     done
 }
 
+@test "application/environment apply to all composite services" {
+    run ${hab} svc load --application=skunkworks --environment=dev "${composite_hart}"
+    assert_success
+
+    for service in $(services_for_composite "${composite_ident}"); do
+        service_name=$(name_from_ident "${service}")
+        assert_spec_value "${service_name}" application_environment "skunkworks.dev"
+    done
+}
+
 @test "reload a composite using --force" {
     run ${hab} svc load "${composite_hart}"
     assert_success

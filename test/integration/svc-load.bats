@@ -153,3 +153,11 @@ setup() {
     assert_spec_value redis desired_state up
     assert_spec_value redis bldr_url "https://bldr.habitat.sh"
 }
+
+@test "application and environment are properly set in a spec" {
+    run ${hab} svc load --application=myapp --environment=prod core/redis
+    assert_success
+
+    assert_spec_value redis ident core/redis
+    assert_spec_value redis application_environment "myapp.prod"
+}

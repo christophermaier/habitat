@@ -482,28 +482,13 @@ fn sub_load(m: &ArgMatches) -> Result<()> {
     let cfg = mgrcfg_from_matches(m)?;
     let install_source = install_source_from_matches(m)?;
 
-    // TODO (CM): need to handle --force flag! WRITE A TEST FOR IT,
-    // TOO!
-    //
-    // How does it differ for composites?
-
     // TODO (CM): should load be able to download new artifacts if
     // you're re-loading with --force?
     // If we've already got a spec for this thing, we don't want to
     // inadvertently download a new version
 
-    // TODO (CM): Maybe?
-    // match ... {
-    //     Some(Spec::Service(x)) => {
-    //     }
-    //     Some(Spec::Composite(x)) => {
-    //     }
-    //     None => {
-    //     }
-    // }
-
-    let installed =
-        if let Some(spec) = existing_spec_for_ident(&cfg, install_source.as_ref().clone()) {
+    let installed = match existing_spec_for_ident(&cfg, install_source.as_ref().clone()) {
+        Some(spec) => {
             // We've seen this service / composite before. Thus `load`
             // basically acts as a way to edit spec files on the
             // command line. As a result, we a) check that you
@@ -531,14 +516,16 @@ fn sub_load(m: &ArgMatches) -> Result<()> {
                     PackageInstall::load(composite_spec.ident(), Some(fs_root_path))?
                 }
             }
-        } else {
+        }
+        None => {
             // We've not seen this before; TO THE BUILDER-MOBILE!
             let bldr_url = bldr_url_from_matches(m);
             let channel = channel_from_matches(m);
             let installed_package =
                 util::pkg::install(&mut UI::default(), &bldr_url, &install_source, &channel)?;
             installed_package
-        };
+        }
+    };
 
     // TODO (CM): Of course, if we don't want to inadvertently change
     // the version, then the original_ident probably needs to be
@@ -699,12 +686,12 @@ fn sub_start(m: &ArgMatches, launcher: LauncherCli) -> Result<()> {
             vec![]
         }
         None => {
-            let depot_url = bldr_url_from_matches(m);
+            let bldr_url = bldr_url_from_matches(m);
             let channel = channel_from_matches(m);
 
-            let installed_package = match util::pkg::installed(install_source.ident()) {
+            let installed_package = match util::pkg::installed(install_source.as_ref()) {
                 None => {
-                    outputln!("Missing package for {}", install_source.ident());
+                    outputln!("Missing package for {}", install_source.as_ref());
                     util::pkg::install(&mut UI::default(), &bldr_url, &install_source, &channel)?
                 }
                 Some(package) => package,
@@ -1240,30 +1227,5 @@ fn installed_specs_from_ident(
         }
         None => (), // TODO (CM): should this be an error?
     }
-
-
-    // if let Some(service_spec) = existing_spec_for_ident(cfg, ident.clone()) {
-    //     specs.push(service_spec);
-    // } else {
-    //     // Doesn't appear to be a standalone; try as a composite
-    //     let composite_spec_file = Manager::composite_path_by_ident(&cfg, &ident);
-    //     if composite_spec_file.is_file() {
-    //         // TODO (CM): BAAARF
-    //         let fs_root_path = Path::new(&*fs::FS_ROOT_PATH);
-    //         let package = PackageInstall::load(&ident, Some(fs_root_path))?;
-
-    //         let services = package.pkg_services()?;
-    //         for service in services {
-    //             let spec = ServiceSpec::from_file(Manager::spec_path_for(
-    //                 cfg,
-    //                 &ServiceSpec::default_for(service),
-    //             ))?;
-    //             specs.push(spec);
-    //         }
-    //     } else {
-    //         // TODO (CM): wasn't a spec or a composite!
-    //         ()
-    //     }
-    // }
     Ok(specs)
 }

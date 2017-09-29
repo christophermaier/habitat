@@ -177,8 +177,6 @@ impl AsRef<PackageIdent> for InstallSource {
 // TODO (CM): Consider passing in a configured depot client instead of
 // product / version... That might make it easier to share with the
 // `sup` crate
-// TODO (CM): is channel obeyed for dependencies? Oh, that's
-// interesting for composites...
 pub fn start<P1, P2>(
     ui: &mut UI,
     url: &str,
@@ -405,7 +403,8 @@ impl<'a> InstallTask<'a> {
 
     /// Given the identifier of an artifact, ensure that the artifact,
     /// as well as all its dependencies, have been cached and
-    /// installed.
+    /// installed. Handles both standalone and composite package
+    /// types.
     ///
     /// If the package is already present in the cache, it is not
     /// re-downloaded. Any dependencies of the package that are not
@@ -414,16 +413,6 @@ impl<'a> InstallTask<'a> {
         // TODO (CM): rename artifact to archive
         let mut artifact = self.get_cached_artifact(ui, ident)?;
 
-        // TODO (CM): Determine if we're installing a composite or
-        // standalone package.
-        //
-        // If standalone, consult the TDEPS file to get a list of
-        // fully-qualified packages to install.
-        //
-        // If composite, consult the SERVICES file to figure out what
-        // services should be installed. If that's the case, we can
-        // just pas back up to the `from_ident` function to fully
-        // install each service.
         match artifact.package_type()? {
             PackageType::Standalone => {
                 // Ensure that all transitive dependencies, as well as the
@@ -454,10 +443,6 @@ impl<'a> InstallTask<'a> {
                 ))?;
             }
             PackageType::Composite => {
-                // Ugh, this is gross, but we need to do it until we
-                // just take a channel explicitly
-                //                let channel = self.channel.unwrap_or(STABLE_CHANNEL);
-
                 let services = artifact.resolved_services()?;
                 for service in services {
                     // We don't track the transitive dependencies of
@@ -465,13 +450,13 @@ impl<'a> InstallTask<'a> {
                     // each service itself does that. Thus, we need to
                     // install them just like we would if we weren't
                     // in a composite.
-
-                    // I don't think we really need a channel down
-                    // here, as all these identifiers will be
-                    // fully-qualified, though we should verify that.
+                    //
+                    // We don't really need a channel down here, as
+                    // all these identifiers are fully-qualified.
                     self.from_ident(ui, service, None)?;
                 }
-
+                // All the services have been unpacked; let's do the
+                // same with the composite package itself.
                 self.unpack_artifact(ui, &mut artifact)?;
             }        
         }

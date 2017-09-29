@@ -77,14 +77,11 @@ composite_name="builder-tiny"
         assert_spec_value "${service_name}" update_strategy none
         assert_spec_value "${service_name}" desired_state up
         assert_spec_value "${service_name}" bldr_url "https://bldr.habitat.sh"
-
-        # Would be nice to assert on binds, too. Could probably just
-        # assume that if the services are running, they're right,
-        # though.
     done
 
-    # Oh, I bet this'll fail because the composite isn't in Builder
-    # Can I reload from a HART?
+    # Note that we're reloading *by ident* a composite we loaded from
+    # a .hart and it's working; we shouldn't need to go out to Builder
+    # just to change specs.
     run ${hab} svc load --force --channel=unstable "${composite_ident}"
 
     assert_composite_spec "${composite_ident}" # <-- should be same

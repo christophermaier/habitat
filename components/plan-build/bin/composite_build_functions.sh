@@ -172,7 +172,7 @@ _validate_bind_mappings() {
     bind_mappings=("${pkg_bind_map[$pkg]}")
     warn "BIND MAPPINGS: ${bind_mappings[@]}"
 
-    # This is space-delimited, so no quotes?
+    # This is space-delimited, so no quotes
     for mapping in ${bind_mappings[@]}; do
       # Each mapping is of the form `bind_name:package`, like so:
       #     router:core/builder-router

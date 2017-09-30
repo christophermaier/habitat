@@ -49,6 +49,12 @@ pub struct CompositeSpec {
     ident: PackageIdent,
 }
 
+// NOTE: Yes, this code is largely copied from ServiceSpec, and should
+// properly be encapsulated into a Trait. However, ServiceSpecs and
+// CompositeSpecs as file-based things will be going away very soon,
+// in favor of IPC-based (rather than file-based) communication, so
+// extracting this code right now has little value.
+
 impl CompositeSpec {
     /// Create a CompositeSpec from the installed representation of a
     /// composite package.
@@ -87,31 +93,25 @@ impl CompositeSpec {
         format!("{}.{}", self.ident().name, SPEC_FILE_EXT)
     }
 
-    // TODO (CM): copied from ServiceSpec; create a trait instead
     pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Self> {
         let file = File::open(&path).map_err(|err| {
-            // TODO (CM): Parameterize this error type
             sup_error!(Error::ServiceSpecFileIO(path.as_ref().to_path_buf(), err))
         })?;
         let mut file = BufReader::new(file);
         let mut buf = String::new();
         file.read_to_string(&mut buf).map_err(|err| {
-            // TODO (CM): Parameterize this error type
             sup_error!(Error::ServiceSpecFileIO(path.as_ref().to_path_buf(), err))
         })?;
         Self::from_str(&buf)
     }
 
-    // TODO (CM): copied from ServiceSpec; create a trait instead
     pub fn to_file<P: AsRef<Path>>(&self, path: P) -> Result<()> {
 
-        // TODO (CM): Parameterize this message with Self?
         debug!(
             "Writing composite spec to '{}': {:?}",
             path.as_ref().display(),
             &self
         );
-        // TODO (CM): Parameterize this message with Self?
         let dst_path = path.as_ref().parent().expect(
             "Cannot determine parent directory for composite spec",
         );
@@ -122,31 +122,26 @@ impl CompositeSpec {
                 .collect::<String>(),
         );
         fs::create_dir_all(dst_path).map_err(|err| {
-            // TODO (CM): Parameterize this error type
             sup_error!(Error::ServiceSpecFileIO(path.as_ref().to_path_buf(), err))
         })?;
 
         // Release the write file handle before the end of the function since we're done
         {
             let mut file = File::create(&tmpfile).map_err(|err| {
-                // TODO (CM): Parameterize this error type
                 sup_error!(Error::ServiceSpecFileIO(tmpfile.to_path_buf(), err))
             })?;
             let toml = self.to_toml_string()?;
             file.write_all(toml.as_bytes()).map_err(|err| {
-                // TODO (CM): Parameterize this error type
                 sup_error!(Error::ServiceSpecFileIO(tmpfile.to_path_buf(), err))
             })?;
         }
         fs::rename(&tmpfile, path.as_ref()).map_err(|err| {
-            // TODO (CM): Parameterize this error type
             sup_error!(Error::ServiceSpecFileIO(path.as_ref().to_path_buf(), err))
         })?;
 
         Ok(())
     }
 
-    // TODO (CM): Copied from ServiceSpec
     fn to_toml_string(&self) -> Result<String> {
         if self.ident() == &PackageIdent::default() {
             return Err(sup_error!(Error::MissingRequiredIdent));
@@ -155,19 +150,24 @@ impl CompositeSpec {
     }
 }
 
-// TODO (CM): Copied from ServiceSpec
 impl FromStr for CompositeSpec {
     type Err = SupError;
 
     fn from_str(toml: &str) -> result::Result<Self, Self::Err> {
         let spec: CompositeSpec = toml::from_str(toml).map_err(|e| {
-            // TODO (CM): this error
             sup_error!(Error::ServiceSpecParse(e))
         })?;
 
-        // TODO (CM): if spec.ident isn't fully qualified!
         if spec.ident == PackageIdent::default() {
             return Err(sup_error!(Error::MissingRequiredIdent));
+        }
+
+        if !spec.ident.fully_qualified() {
+            return Err(SupError::from(
+                HCoreError::FullyQualifiedPackageIdentRequired(
+                    spec.ident().to_string(),
+                ),
+            ));
         }
         Ok(spec)
     }

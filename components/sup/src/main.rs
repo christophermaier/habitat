@@ -501,10 +501,9 @@ fn sub_load(m: &ArgMatches) -> Result<()> {
                 return Err(sup_error!(Error::ServiceLoaded(spec.ident().clone())));
             }
 
-            let fs_root_path = Path::new(&*fs::FS_ROOT_PATH); // TODO (CM): baaaaarffff
             match spec {
                 Spec::Service(mut service_spec) => {
-                    // If we changed our spec AND we're not going to
+                    // If we changed our ident AND we're not going to
                     // be updating, we HAVE to install a new package
                     // now to ensure we've got the right code to
                     // run. Otherwise, we're either good to continue
@@ -513,7 +512,7 @@ fn sub_load(m: &ArgMatches) -> Result<()> {
                     let ident_changed = install_source.as_ref() != &service_spec.ident;
 
                     service_spec.ident = install_source.as_ref().clone();
-                    update_spec_from_user(&mut service_spec, m)?;
+                    update_spec_from_input(&mut service_spec, m)?;
 
                     let strategy_is_none = service_spec.update_strategy == UpdateStrategy::None;
 
@@ -560,6 +559,7 @@ fn sub_load(m: &ArgMatches) -> Result<()> {
 
 
                     // load the composite package from disk
+                    let fs_root_path = Path::new(&*fs::FS_ROOT_PATH); // TODO (CM): baaaaarffff
                     PackageInstall::load(composite_spec.ident(), Some(fs_root_path))?
                 }
             }
@@ -581,7 +581,7 @@ fn sub_load(m: &ArgMatches) -> Result<()> {
     // only applies to standalones, not composites, since *their*
     // idents are baked in.
     let original_ident = install_source.as_ref();
-    let mut specs = specs_from_package(original_ident, &installed, m)?;
+    let mut specs = generate_new_specs_from_package(original_ident, &installed, m)?;
 
     // If this is an error, then it wasn't a composite :P
     // TODO (CM): Is there a better place to put this / better way to
@@ -711,32 +711,42 @@ fn sub_start(m: &ArgMatches, launcher: LauncherCli) -> Result<()> {
                 spec.desired_state = DesiredState::Up;
                 vec![spec]
             } else {
-                if !Manager::is_running(&cfg)? {
-                    let mut manager = Manager::load(cfg, launcher)?;
-                    return manager.run();
-                } else {
-                    process::exit(OK_NO_RETRY_EXCODE);
-                }
+                return start_supervisor_if_not_running(cfg, launcher);
             }
         }
-        Some(Spec::Composite(x)) => {
-            // TODO (CM): need to check to see if you already have the
-            // composite in place, and if so, start everything
-            vec![]
+        Some(Spec::Composite(_)) => {
+            // Grab all specs of the composite
+            let mut specs = installed_specs_from_ident(&cfg, original_ident)?;
+
+            // If all the specs were already set to "up", then we just
+            // need to start everything. Otherwise, we need to set
+            // everything to "up", and then pass the specs out to be
+            // saved.
+            let mut everything_already_desired_up = true;
+            for spec in specs.iter_mut() {
+                if spec.desired_state == DesiredState::Down {
+                    spec.desired_state = DesiredState::Up;
+                    everything_already_desired_up = false;
+                }
+            }
+
+            if everything_already_desired_up {
+                return start_supervisor_if_not_running(cfg, launcher);
+            }
+
+            specs
         }
         None => {
+            // We have no existing specs, which means we need to go
+            // installing things (but only if we don't have anything
+            // installed already).
             let bldr_url = bldr_url(m);
             let channel = channel(m);
 
-            let installed_package = match util::pkg::installed(install_source.as_ref()) {
-                None => {
-                    outputln!("Missing package for {}", install_source.as_ref());
-                    util::pkg::install(&mut UI::default(), &bldr_url, &install_source, &channel)?
-                }
-                Some(package) => package,
-            };
+            let installed_package =
+                install_package_if_not_present(&install_source, &bldr_url, &channel)?;
 
-            let specs = specs_from_package(&original_ident, &installed_package, m)?;
+            let specs = generate_new_specs_from_package(&original_ident, &installed_package, m)?;
 
             // Saving the composite spec here, because we currently
             // need the PackageInstall to create it! It'll only create
@@ -749,11 +759,10 @@ fn sub_start(m: &ArgMatches, launcher: LauncherCli) -> Result<()> {
         }
     };
 
-    // TODO (CM):  copied from load
-    // Need to tease apart exact differences between start and load
     for spec in specs.iter() {
         Manager::save_spec_for(&cfg, spec)?;
     }
+
     if Manager::is_running(&cfg)? {
         outputln!(
             "Supervisor starting {}. See the Supervisor output for more details.",
@@ -1167,7 +1176,7 @@ fn new_service_spec(ident: PackageIdent, m: &ArgMatches) -> Result<ServiceSpec> 
     Ok(spec)
 }
 
-fn update_spec_from_user(mut spec: &mut ServiceSpec, m: &ArgMatches) -> Result<()> {
+fn update_spec_from_input(mut spec: &mut ServiceSpec, m: &ArgMatches) -> Result<()> {
     // The Builder URL and channel have default values; we only want to
     // change them if the user specified something!
     set_bldr_url_from_input(&mut spec, m);
@@ -1266,10 +1275,39 @@ where
     })
 }
 
+fn start_supervisor_if_not_running(cfg: ManagerConfig, launcher: LauncherCli) -> Result<()> {
+    if !Manager::is_running(&cfg)? {
+        let mut manager = Manager::load(cfg, launcher)?;
+        return manager.run();
+    } else {
+        process::exit(OK_NO_RETRY_EXCODE);
+    }
+}
+
+/// Given an InstallSource, install a new package only if an existing
+/// one that can satisfy the package identifier is not already
+/// present.
+///
+/// Return the PackageInstall corresponding to the package that was
+/// installed, or was pre-existing.
+fn install_package_if_not_present(
+    install_source: &InstallSource,
+    bldr_url: &str,
+    channel: &str,
+) -> Result<PackageInstall> {
+    match util::pkg::installed(install_source.as_ref()) {
+        Some(package) => Ok(package),
+        None => {
+            outputln!("Missing package for {}", install_source.as_ref());
+            util::pkg::install(&mut UI::default(), bldr_url, install_source, channel)
+        }
+    }
+}
+
 /// Given an installed package, generate a spec (or specs, in the case
 /// of composite packages!) from it and the arguments passed in on the
 /// command line.
-fn specs_from_package(
+fn generate_new_specs_from_package(
     original_ident: &PackageIdent,
     package: &PackageInstall,
     m: &ArgMatches,
@@ -1346,9 +1384,9 @@ fn specs_from_package(
                             // NOTE: We are explicitly NOT generating
                             // binds that include "organization". This
                             // is a feature that never quite found its
-                            // footing, and will likely be removed
-                            // from Habitat Real Soon Now (TM) (as of
-                            // September 2017).
+                            // footing, and will likely be removed /
+                            // greatly overhauled Real Soon Now (TM)
+                            // (as of September 2017).
                             //
                             // As it exists right now, "organization"
                             // is a supervisor-wide setting, and thus
@@ -1398,6 +1436,9 @@ fn installed_specs_from_ident(
             specs.push(service_spec);
         }
         Some(Spec::Composite(composite_spec)) => {
+
+            // TODO (CM): extract this as a function
+
             let fs_root_path = Path::new(&*fs::FS_ROOT_PATH);
             let package = PackageInstall::load(&ident, Some(fs_root_path))?;
 
@@ -1409,6 +1450,7 @@ fn installed_specs_from_ident(
                 ))?;
                 specs.push(spec);
             }
+
         }
         None => (), // TODO (CM): should this be an error?
     }

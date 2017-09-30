@@ -10,8 +10,8 @@ teardown() {
     stop_supervisor
 }
 
-composite_ident="core/builder-tiny/1.0.0/20170928220329"
-composite_hart=fixtures/core-builder-tiny-1.0.0-20170928220329-x86_64-linux.hart
+composite_ident="core/builder-tiny/1.0.0/20170930190003"
+composite_hart=fixtures/core-builder-tiny-1.0.0-20170930190003-x86_64-linux.hart
 composite_short_ident="core/builder-tiny"
 composite_name="builder-tiny"
 
@@ -251,6 +251,33 @@ composite_name="builder-tiny"
     assert_composite_and_services_are_installed "${composite_ident}"
 
     assert_composite_spec "${composite_ident}"
+}
+
+@test "restart a composite" {
+    ${hab} pkg install core/runit --binlink
+    background ${hab} run
+
+    run ${hab} svc load "${composite_hart}"
+    assert_success
+
+    wait_for_service_to_run builder-router
+    wait_for_service_to_run builder-api
+    wait_for_service_to_run builder-api-proxy
+
+    run ${hab} svc stop "${composite_short_ident}"
+    assert_success
+
+    # wait for services to stop
+    # TODO (CM): Need a helper for this
+    sleep 5
+
+
+    run ${hab} svc start "${composite_short_ident}"
+    assert_success
+
+    wait_for_service_to_run builder-router
+    wait_for_service_to_run builder-api
+    wait_for_service_to_run builder-api-proxy
 }
 
 @test "binds for just service groups are generated and valid" {

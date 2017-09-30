@@ -109,6 +109,8 @@ composite_name="builder-tiny"
         assert_spec_value "${service_name}" desired_state up
         assert_spec_value "${service_name}" bldr_url "https://bldr.habitat.sh"
     done
+
+    false # Need to verify that this really behaves properly
 }
 
 

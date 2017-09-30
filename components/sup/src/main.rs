@@ -48,7 +48,7 @@ use hcore::package::PackageIdent;
 use hcore::package::install::PackageInstall;
 use hcore::package::metadata::PackageType;
 use hcore::service::{ApplicationEnvironment, ServiceGroup};
-use hcore::url::default_bldr_url;
+use hcore::url::{bldr_url_from_env, default_bldr_url};
 use launcher_client::{LauncherCli, ERR_NO_RETRY_EXCODE, OK_NO_RETRY_EXCODE};
 use url::Url;
 
@@ -480,7 +480,7 @@ fn sub_load(m: &ArgMatches) -> Result<()> {
         hcore::output::set_no_color(true);
     }
     let cfg = mgrcfg_from_matches(m)?;
-    let install_source = install_source_from_matches(m)?;
+    let install_source = install_source_from_input(m)?;
 
     // TODO (CM): should load be able to download new artifacts if
     // you're re-loading with --force?
@@ -496,22 +496,69 @@ fn sub_load(m: &ArgMatches) -> Result<()> {
             // NOT download a potentially new version of the package
             // in question
 
-            // TODO (CM): We *could* check the ident of the spec and
-            // compare it to the one we got on the CLI, with the
-            // assumption being that if you're changing *that* then
-            // you DO want a new version?
-
             if !m.is_present("FORCE") {
                 // TODO (CM): make this error reflect composites
                 return Err(sup_error!(Error::ServiceLoaded(spec.ident().clone())));
             }
+
             let fs_root_path = Path::new(&*fs::FS_ROOT_PATH); // TODO (CM): baaaaarffff
             match spec {
-                Spec::Service(service_spec) => {
-                    // load the service package from disk
-                    PackageInstall::load(service_spec.ident.as_ref(), Some(fs_root_path))?
+                Spec::Service(mut service_spec) => {
+                    // If we changed our spec AND we're not going to
+                    // be updating, we HAVE to install a new package
+                    // now to ensure we've got the right code to
+                    // run. Otherwise, we're either good to continue
+                    // running what we've got, or the ServiceUpdater
+                    // will handle things for us.
+                    let ident_changed = install_source.as_ref() != &service_spec.ident;
+
+                    service_spec.ident = install_source.as_ref().clone();
+                    update_spec_from_user(&mut service_spec, m)?;
+
+                    let strategy_is_none = service_spec.update_strategy == UpdateStrategy::None;
+
+                    if ident_changed && strategy_is_none {
+                        util::pkg::install(
+                            &mut UI::default(),
+                            &service_spec.bldr_url,
+                            &install_source,
+                            &service_spec.channel,
+                        )?;
+                    }
+
+                    service_spec.start_style = StartStyle::Persistent;
+
+                    // write the spec
+                    Manager::save_spec_for(&cfg, &service_spec)?;
+                    outputln!("The {} service was successfully loaded", service_spec.ident);
+                    return Ok(());
                 }
                 Spec::Composite(composite_spec) => {
+                    // TODO (CM):  handle reload question here
+
+                    // Did the ident change?... Oh, how would we know?
+                    // we don't store the ident in the spec!
+
+                    // Anyway...
+                    // If the spec HAS NOT CHANGED, then we need to
+                    // tweak all the EXISTING specs for the composite.
+                    //
+                    // for each spec
+                    // update the spec based on the user input. if the
+                    // composite didn't change, then these ident's
+                    // won't have either (or have they? What if a user
+                    // individually tweaked them?)
+
+                    //
+                    // If the composite ident HAS changed... (again,
+                    // how would we determine that)
+                    //
+                    // That means that we need to figure out what
+                    // services need to stay, which need to go, and
+                    // which are new. Ugh... let's clean up the rest
+                    // of this before tackling that, eh?
+
+
                     // load the composite package from disk
                     PackageInstall::load(composite_spec.ident(), Some(fs_root_path))?
                 }
@@ -519,13 +566,14 @@ fn sub_load(m: &ArgMatches) -> Result<()> {
         }
         None => {
             // We've not seen this before; TO THE BUILDER-MOBILE!
-            let bldr_url = bldr_url_from_matches(m);
-            let channel = channel_from_matches(m);
-            let installed_package =
-                util::pkg::install(&mut UI::default(), &bldr_url, &install_source, &channel)?;
-            installed_package
+            let bldr_url = bldr_url(m);
+            let channel = channel(m);
+            util::pkg::install(&mut UI::default(), &bldr_url, &install_source, &channel)?
         }
     };
+
+
+    // TODO (CM): The code below needs to be pulled up
 
     // TODO (CM): Of course, if we don't want to inadvertently change
     // the version, then the original_ident probably needs to be
@@ -657,7 +705,7 @@ fn sub_start(m: &ArgMatches, launcher: LauncherCli) -> Result<()> {
         ui.br()?;
     }
 
-    let install_source = install_source_from_matches(m)?;
+    let install_source = install_source_from_input(m)?;
     let original_ident: &PackageIdent = install_source.as_ref();
 
     // NOTE: As coded, if you try to start a service from a hart file,
@@ -686,8 +734,8 @@ fn sub_start(m: &ArgMatches, launcher: LauncherCli) -> Result<()> {
             vec![]
         }
         None => {
-            let bldr_url = bldr_url_from_matches(m);
-            let channel = channel_from_matches(m);
+            let bldr_url = bldr_url(m);
+            let channel = channel(m);
 
             let installed_package = match util::pkg::installed(install_source.as_ref()) {
                 None => {
@@ -726,49 +774,6 @@ fn sub_start(m: &ArgMatches, launcher: LauncherCli) -> Result<()> {
     }
 
     Ok(())
-}
-
-
-// Internal usage only (at this point, anyway) to abstract over spec
-// type.
-enum Spec {
-    Service(ServiceSpec),
-    Composite(CompositeSpec),
-}
-
-impl Spec {
-    fn ident(&self) -> &PackageIdent {
-        match self {
-            &Spec::Composite(ref s) => s.ident(),
-            &Spec::Service(ref s) => s.ident.as_ref(),
-        }
-    }
-}
-
-// Given a package identifier, return the ServiceSpec for that
-// package, if it already exists in this Supervisor.
-//
-// TODO (CM): passing ownership of the PackageIdent here is gross, and
-// we shouldn't need it... we're ultimately just trying to generate a
-// file path from data in that file. Once we stop using
-// `ServiceSpec::default_for()`, we can pass a reference here instead.
-fn existing_spec_for_ident(cfg: &ManagerConfig, ident: PackageIdent) -> Option<Spec> {
-    let default_spec = ServiceSpec::default_for(ident.clone());
-    let spec_file = Manager::spec_path_for(cfg, &default_spec);
-
-    // Try it as a service first
-    if let Ok(spec) = ServiceSpec::from_file(&spec_file) {
-        return Some(Spec::Service(spec));
-    } else {
-        // Try it as a composite next
-        let composite_spec_file = Manager::composite_path_by_ident(&cfg, &ident);
-        if composite_spec_file.is_file() {
-            return CompositeSpec::from_file(composite_spec_file)
-                .and_then(|s| Ok(Spec::Composite(s)))
-                .ok();
-        }
-    }
-    None
 }
 
 fn sub_status(m: &ArgMatches) -> Result<()> {
@@ -838,12 +843,56 @@ fn sub_term(m: &ArgMatches) -> Result<()> {
     }
 }
 
+
+// Internal Implementation Details
+////////////////////////////////////////////////////////////////////////
+
+/// Helper enum to abstract over spec type.
+///
+/// Currently needed only here. Don't bother moving anywhere because
+/// ServiceSpecs AND CompositeSpecs will be going away soon anyway.
+enum Spec {
+    Service(ServiceSpec),
+    Composite(CompositeSpec),
+}
+
+impl Spec {
+    /// We need to get at the identifier of a spec, regardless of
+    /// which kind it is.
+    fn ident(&self) -> &PackageIdent {
+        match self {
+            &Spec::Composite(ref s) => s.ident(),
+            &Spec::Service(ref s) => s.ident.as_ref(),
+        }
+    }
+}
+
+/// Given a package identifier, return the `Spec` for that
+/// package, if it already exists in this supervisor.
+fn existing_spec_for_ident(cfg: &ManagerConfig, ident: PackageIdent) -> Option<Spec> {
+    let default_spec = ServiceSpec::default_for(ident.clone());
+    let spec_file = Manager::spec_path_for(cfg, &default_spec);
+
+    // Try it as a service first
+    if let Ok(spec) = ServiceSpec::from_file(&spec_file) {
+        Some(Spec::Service(spec))
+    } else {
+        // Try it as a composite next
+        let composite_spec_file = Manager::composite_path_by_ident(&cfg, &ident);
+        // If the file doesn't exist, that'll be an error, which will
+        // convert to None, which is fine
+        CompositeSpec::from_file(composite_spec_file)
+            .and_then(|s| Ok(Spec::Composite(s)))
+            .ok()
+    }
+}
+
 fn mgrcfg_from_matches(m: &ArgMatches) -> Result<ManagerConfig> {
     let mut cfg = ManagerConfig::default();
 
     cfg.auto_update = m.is_present("AUTO_UPDATE");
-    cfg.update_url = bldr_url_from_matches(m);
-    cfg.update_channel = channel_from_matches(m);
+    cfg.update_url = bldr_url(m);
+    cfg.update_channel = channel(m);
     if let Some(addr_str) = m.value_of("LISTEN_GOSSIP") {
         cfg.gossip_listen = GossipListenAddr::from_str(addr_str)?;
     }
@@ -931,26 +980,39 @@ fn mgrcfg_from_matches(m: &ArgMatches) -> Result<ManagerConfig> {
     Ok(cfg)
 }
 
-/// Resolve a Builder URL. Taken from the environment or from CLI args,
-/// if given.
-fn bldr_url_from_matches(matches: &ArgMatches) -> String {
-    match matches.value_of("BLDR_URL") {
+
+// Various CLI Parsing Functions
+////////////////////////////////////////////////////////////////////////
+
+/// Resolve a Builder URL. Taken from CLI args, the environment, or
+/// (failing those) a default value.
+fn bldr_url(m: &ArgMatches) -> String {
+    match bldr_url_from_input(m) {
         Some(url) => url.to_string(),
         None => default_bldr_url(),
     }
 }
 
-/// Resolve a channel. Taken from the environment or from CLI args, if
-/// given.
-fn channel_from_matches(matches: &ArgMatches) -> String {
-    matches
-        .value_of("CHANNEL")
-        .and_then(|c| Some(c.to_string()))
-        .unwrap_or(channel::default())
+/// A Builder URL, but *only* if the user specified it via CLI args or
+/// the environment
+fn bldr_url_from_input(m: &ArgMatches) -> Option<String> {
+    m.value_of("BLDR_URL")
+        .and_then(|u| Some(u.to_string()))
+        .or_else(|| bldr_url_from_env())
 }
 
+/// Resolve a channel. Taken from CLI args, or (failing that), a
+/// default value.
+fn channel(matches: &ArgMatches) -> String {
+    channel_from_input(matches).unwrap_or(channel::default())
+}
 
-fn install_source_from_matches(m: &ArgMatches) -> Result<InstallSource> {
+/// A channel name, but *only* if the user specified via CLI args.
+fn channel_from_input(m: &ArgMatches) -> Option<String> {
+    m.value_of("CHANNEL").and_then(|c| Some(c.to_string()))
+}
+
+fn install_source_from_input(m: &ArgMatches) -> Result<InstallSource> {
     // PKG_IDENT_OR_ARTIFACT is required in subcommands that use it,
     // so unwrap() is safe here.
     let ident_or_artifact = m.value_of("PKG_IDENT_OR_ARTIFACT").unwrap();
@@ -958,30 +1020,30 @@ fn install_source_from_matches(m: &ArgMatches) -> Result<InstallSource> {
     Ok(install_source)
 }
 
-fn spec_from_matches(ident: PackageIdent, m: &ArgMatches) -> Result<ServiceSpec> {
-    let mut spec = ServiceSpec::default_for(ident);
 
-    set_group_from_matches(&mut spec, m);
-    set_app_env_from_matches(&mut spec, m)?;
-    set_bldr_url_from_matches(&mut spec, m);
-    set_channel_from_matches(&mut spec, m);
-    set_topology_from_matches(&mut spec, m)?;
-    set_strategy_from_matches(&mut spec, m)?;
-    set_binds_from_matches(&mut spec, m)?;
-    set_config_from_matches(&mut spec, m)?;
 
-    set_spec_password(m, &mut spec)?;
 
-    Ok(spec)
-}
 
-fn set_group_from_matches(spec: &mut ServiceSpec, m: &ArgMatches) {
-    if let Some(group) = m.value_of("GROUP") {
-        spec.group = group.to_string();
+
+
+
+
+// ServiceSpec Modification Functions
+////////////////////////////////////////////////////////////////////////
+
+// If the user supplied a --group option, set it on the
+// spec. Otherwise, we inherit the default value in the ServiceSpec,
+// which is "default".
+fn set_group_from_input(spec: &mut ServiceSpec, m: &ArgMatches) {
+    if let Some(g) = m.value_of("GROUP") {
+        spec.group = g.to_string();
     }
 }
 
-fn set_app_env_from_matches(spec: &mut ServiceSpec, m: &ArgMatches) -> Result<()> {
+// If the user provides both --application and --environment options,
+// parse and set the value on the spec. Otherwise, we inherit the
+// default value of the ServiceSpec, which is None
+fn set_app_env_from_input(spec: &mut ServiceSpec, m: &ArgMatches) -> Result<()> {
     if let (Some(app), Some(env)) = (m.value_of("APPLICATION"), m.value_of("ENVIRONMENT")) {
         spec.application_environment = Some(ApplicationEnvironment::new(
             app.to_string(),
@@ -990,25 +1052,48 @@ fn set_app_env_from_matches(spec: &mut ServiceSpec, m: &ArgMatches) -> Result<()
     }
     Ok(())
 }
-fn set_bldr_url_from_matches(spec: &mut ServiceSpec, m: &ArgMatches) {
-    spec.bldr_url = bldr_url_from_matches(m);
+
+// Set a spec's Builder URL from CLI / environment variables, falling back
+// to a default value.
+fn set_bldr_url(spec: &mut ServiceSpec, m: &ArgMatches) {
+    spec.bldr_url = bldr_url(m);
 }
-fn set_channel_from_matches(spec: &mut ServiceSpec, m: &ArgMatches) {
-    spec.channel = channel_from_matches(m);
-}
-fn set_topology_from_matches(spec: &mut ServiceSpec, m: &ArgMatches) -> Result<()> {
-    if let Some(topology) = m.value_of("TOPOLOGY") {
-        spec.topology = Topology::from_str(topology)?;
+
+fn set_bldr_url_from_input(spec: &mut ServiceSpec, m: &ArgMatches) {
+    if let Some(url) = bldr_url_from_input(m) {
+        spec.bldr_url = url
     }
-    Ok(())
 }
-fn set_strategy_from_matches(spec: &mut ServiceSpec, m: &ArgMatches) -> Result<()> {
-    if let Some(ref strategy) = m.value_of("STRATEGY") {
-        spec.update_strategy = UpdateStrategy::from_str(strategy)?;
+
+fn set_channel_from_input(spec: &mut ServiceSpec, m: &ArgMatches) {
+    if let Some(channel) = channel_from_input(m) {
+        spec.channel = channel
     }
-    Ok(())
 }
-fn set_binds_from_matches(spec: &mut ServiceSpec, m: &ArgMatches) -> Result<()> {
+
+// Set a spec's channel from CLI values, falling back
+// to a default value.
+fn set_channel(spec: &mut ServiceSpec, m: &ArgMatches) {
+    spec.channel = channel(m);
+}
+
+fn set_topology_from_input(spec: &mut ServiceSpec, m: &ArgMatches) {
+    if let Some(t) = m.value_of("TOPOLOGY") {
+        // unwrap() is safe, because the input is validated by
+        // `valid_topology`
+        spec.topology = Topology::from_str(t).unwrap();
+    }
+}
+
+fn set_strategy_from_input(spec: &mut ServiceSpec, m: &ArgMatches) {
+    if let Some(s) = m.value_of("STRATEGY") {
+        // unwrap() is safe, because the input is validated by `valid_update_strategy`
+        spec.update_strategy = UpdateStrategy::from_str(s).unwrap();
+    }
+}
+
+/// NOTE: binds for composite services should NOT be set using this
+fn set_binds_from_input(spec: &mut ServiceSpec, m: &ArgMatches) -> Result<()> {
     if let Some(bind_strs) = m.values_of("BIND") {
         let mut binds = Vec::new();
         for bind_str in bind_strs {
@@ -1019,7 +1104,7 @@ fn set_binds_from_matches(spec: &mut ServiceSpec, m: &ArgMatches) -> Result<()> 
     Ok(())
 }
 
-fn set_config_from_matches(spec: &mut ServiceSpec, m: &ArgMatches) -> Result<()> {
+fn set_config_from_input(spec: &mut ServiceSpec, m: &ArgMatches) -> Result<()> {
     if let Some(ref config_from) = m.value_of("CONFIG_DIR") {
         spec.config_from = Some(PathBuf::from(config_from));
         outputln!("");
@@ -1036,18 +1121,143 @@ fn set_config_from_matches(spec: &mut ServiceSpec, m: &ArgMatches) -> Result<()>
 }
 
 #[cfg(target_os = "windows")]
-fn set_spec_password(m: &ArgMatches, spec: &mut ServiceSpec) -> Result<()> {
+fn set_password_from_input(spec: &mut ServiceSpec, m: &ArgMatches) -> Result<()> {
     if let Some(password) = m.value_of("PASSWORD") {
         spec.svc_encrypted_password = Some(encrypt(password.to_string())?);
     }
-
     Ok(())
 }
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
-fn set_spec_password(_: &ArgMatches, _: &mut ServiceSpec) -> Result<()> {
+fn set_password_from_input(_: &mut ServiceSpec, _: &ArgMatches) -> Result<()> {
     Ok(())
 }
+
+
+// ServiceSpec Generation Functions
+////////////////////////////////////////////////////////////////////////
+//
+// While ServiceSpec has an implementation of the Default trait, we
+// want to be sure that specs created in this module unquestionably
+// conform to the defaults that our CLI lays out.
+//
+// Similarly, when ever we update existing specs (e.g., hab svc load
+// --force) we must take care that we only change values that the user
+// has given explicitly, and not override using default values.
+//
+// To that end, we have a function that create a "default ServiceSpec"
+// as far as this module is concerned, which is to be used when
+// creating *new* specs, and another that merges an *existing* spec
+// with only command-line arguments.
+//
+////////////////////////////////////////////////////////////////////////
+
+fn new_service_spec(ident: PackageIdent, m: &ArgMatches) -> Result<ServiceSpec> {
+    let mut spec = ServiceSpec::default_for(ident);
+
+    set_bldr_url(&mut spec, m);
+    set_channel(&mut spec, m);
+
+    set_app_env_from_input(&mut spec, m)?;
+    set_group_from_input(&mut spec, m);
+    set_strategy_from_input(&mut spec, m);
+    set_topology_from_input(&mut spec, m);
+
+    // TODO (CM): Remove these for composite-member specs
+    set_binds_from_input(&mut spec, m)?;
+    set_config_from_input(&mut spec, m)?;
+    set_password_from_input(&mut spec, m)?;
+
+    Ok(spec)
+}
+
+fn update_spec_from_user(mut spec: &mut ServiceSpec, m: &ArgMatches) -> Result<()> {
+
+    // The Builder URL and channel have default values; we only want to
+    // change them if the user specified something!
+    set_bldr_url_from_input(&mut spec, m);
+    set_channel_from_input(&mut spec, m);
+
+    set_app_env_from_input(&mut spec, m)?;
+    set_group_from_input(&mut spec, m);
+    set_strategy_from_input(&mut spec, m);
+    set_topology_from_input(&mut spec, m);
+
+    // TODO (CM): Remove these for composite-member specs
+    set_binds_from_input(&mut spec, m)?;
+    set_config_from_input(&mut spec, m)?;
+    set_password_from_input(&mut spec, m)?;
+
+    Ok(())
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+// CLAP Validation Functions
+////////////////////////////////////////////////////////////////////////
 
 fn dir_exists(val: String) -> result::Result<(), String> {
     if Path::new(&val).is_dir() {
@@ -1085,6 +1295,9 @@ fn valid_url(val: String) -> result::Result<(), String> {
     }
 }
 
+////////////////////////////////////////////////////////////////////////
+
+
 fn enable_features_from_env() {
     let features = vec![(feat::List, "LIST")];
 
@@ -1117,7 +1330,7 @@ fn specs_from_package(
 ) -> Result<Vec<ServiceSpec>> {
     let specs = match package.pkg_type()? {
         PackageType::Standalone => {
-            let spec = spec_from_matches(original_ident.clone(), m)?;
+            let spec = new_service_spec(original_ident.clone(), m)?;
             vec![spec]
         }
         PackageType::Composite => {
@@ -1131,16 +1344,26 @@ fn specs_from_package(
             // (Note that once we're done setting it up, base_spec is
             // intentionally immutable.)
             let base_spec = {
-                let mut spec = ServiceSpec::default();
-                set_group_from_matches(&mut spec, m);
-                set_app_env_from_matches(&mut spec, m)?;
-                set_bldr_url_from_matches(&mut spec, m);
-                set_channel_from_matches(&mut spec, m);
-                set_topology_from_matches(&mut spec, m)?;
-                set_strategy_from_matches(&mut spec, m)?;
 
-                // TODO (CM): does this also need to be the same for everything?
-                set_spec_password(m, &mut spec)?;
+                // TODO (CM): would like to use new_service_spec if possible
+
+                let mut spec = ServiceSpec::default();
+                set_bldr_url(&mut spec, m);
+                set_channel(&mut spec, m);
+
+                set_app_env_from_input(&mut spec, m)?;
+                set_group_from_input(&mut spec, m);
+                set_strategy_from_input(&mut spec, m);
+                set_topology_from_input(&mut spec, m);
+
+                // TODO (CM): does this also need to be the same for
+                // everything?
+                // NOOOOOOO
+                set_password_from_input(&mut spec, m)?;
+
+                // TODO (CM): unset binds
+                // TODO (CM): unset config?
+                // TODO (CM): unset password?
 
                 spec.composite = Some(composite_name.to_string());
                 spec
@@ -1163,7 +1386,7 @@ fn specs_from_package(
                 // - start style?
 
                 // TODO (CM): Not sure if config has meaning for composites?
-                // set_config_from_matches(&mut spec, m)?;
+                // set_config_from_input(&mut spec, m)?;
                 if let Some(bind_mappings) = bind_map.get(&spec.ident) {
                     let mut service_binds = Vec::with_capacity(bind_mappings.len());
 
@@ -1196,10 +1419,10 @@ fn specs_from_package(
     Ok(specs)
 }
 
-// Given a `PackageIdent` representing something currently running,
-// return a list of `ServiceSpec`s that correspond to that. Generally,
-// this will be a single spec if the identifier refers to a standalone
-// package, but will be multiple if it refers to a composite package.
+/// Given a `PackageIdent` representing something currently running,
+/// return a list of `ServiceSpec`s that correspond to that. Generally,
+/// this will be a single spec if the identifier refers to a standalone
+/// package, but will be multiple if it refers to a composite package.
 fn installed_specs_from_ident(
     cfg: &ManagerConfig,
     ident: &PackageIdent,

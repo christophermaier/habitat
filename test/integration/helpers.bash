@@ -90,6 +90,12 @@ assert_service_running() {
 
 # Extracts a value from the given service's spec file and asserts that
 # its value is as expected.
+#
+# When asserting for binds, pass the entire expected TOML array as a
+# string, e.g.
+#
+#    assert_spec_value my_service binds '["foo:otherservice.default"]'
+#
 assert_spec_value() {
     local service=${1}
     local key=${2}
@@ -99,7 +105,13 @@ assert_spec_value() {
     run grep ${key} ${spec}
     assert_success
 
-    assert_equal "${output}" "${key} = \"${expected}\""
+
+    if [ "${key}" = "binds" ]; then
+        # Binds are an array, and so shouldn't be quoted
+        assert_equal "${output}" "${key} = ${expected}"
+    else
+        assert_equal "${output}" "${key} = \"${expected}\""
+    fi
 }
 
 # All loaded composites currently write out a spec for themselves, the

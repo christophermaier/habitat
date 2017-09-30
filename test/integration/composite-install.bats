@@ -113,21 +113,6 @@ composite_name="builder-tiny"
     false # Need to verify that this really behaves properly
 }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 @test "unload a composite" {
     # Load a composite and two other standalone services and verify
     # all specs are in place
@@ -266,4 +251,36 @@ composite_name="builder-tiny"
     assert_composite_and_services_are_installed "${composite_ident}"
 
     assert_composite_spec "${composite_ident}"
+}
+
+@test "binds for just service groups are generated and valid" {
+    run ${hab} pkg install core/runit --binlink
+    background ${hab} run
+
+    run ${hab} svc load "${composite_hart}"
+    assert_success
+
+    wait_for_service_to_run builder-router
+    wait_for_service_to_run builder-api
+    wait_for_service_to_run builder-api-proxy
+
+    assert_spec_value builder-router binds "[]"
+    assert_spec_value builder-api binds '["router:builder-router.default"]'
+    assert_spec_value builder-api-proxy binds '["http:builder-api.default"]'
+}
+
+@test "binds for service group + app/env are generated and valid" {
+    run ${hab} pkg install core/runit --binlink
+    background ${hab} run
+
+    run ${hab} svc load --group=default --application=finn --environment=candykingdom "${composite_hart}"
+    assert_success
+
+    wait_for_service_to_run builder-router
+    wait_for_service_to_run builder-api
+    wait_for_service_to_run builder-api-proxy
+
+    assert_spec_value builder-router binds "[]"
+    assert_spec_value builder-api binds '["router:finn.candykingdom#builder-router.default"]'
+    assert_spec_value builder-api-proxy binds '["http:finn.candykingdom#builder-api.default"]'
 }

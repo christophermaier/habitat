@@ -1338,8 +1338,23 @@ fn specs_from_package(
                         let group = ServiceGroup::new(
                             spec.application_environment.as_ref(),
                             &bind_mapping.satisfying_service.name,
-                            &spec.group, // JUST THE NAME!
-                            organization_from_input(m).as_ref().map(String::as_ref),
+                            &spec.group,
+                            // NOTE: We are explicitly NOT generating
+                            // binds that include "organization". This
+                            // is a feature that never quite found its
+                            // footing, and will likely be removed
+                            // from Habitat Real Soon Now (TM) (as of
+                            // September 2017).
+                            //
+                            // As it exists right now, "organization"
+                            // is a supervisor-wide setting, and thus
+                            // is only available for `hab sup run` and
+                            // `hab svc start`. We don't have a way
+                            // from `hab svc load` to access the
+                            // organization setting of an active
+                            // supervisor, and so we can't generate
+                            // binds that include organizations.
+                            None,
                         )?;
                         let service_bind = ServiceBind {
                             name: bind_mapping.bind_name.clone(),

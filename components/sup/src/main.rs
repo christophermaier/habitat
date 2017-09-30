@@ -1019,10 +1019,6 @@ fn install_source_from_input(m: &ArgMatches) -> Result<InstallSource> {
     Ok(install_source)
 }
 
-fn organization_from_input(m: &ArgMatches) -> Option<String> {
-    m.value_of("ORGANIZATION").map(|org| org.to_string())
-}
-
 // ServiceSpec Modification Functions
 ////////////////////////////////////////////////////////////////////////
 

@@ -980,7 +980,6 @@ fn mgrcfg_from_matches(m: &ArgMatches) -> Result<ManagerConfig> {
     Ok(cfg)
 }
 
-
 // Various CLI Parsing Functions
 ////////////////////////////////////////////////////////////////////////
 
@@ -1020,29 +1019,25 @@ fn install_source_from_input(m: &ArgMatches) -> Result<InstallSource> {
     Ok(install_source)
 }
 
-
-
-
-
-
-
-
+fn organization_from_input(m: &ArgMatches) -> Option<String> {
+    m.value_of("ORGANIZATION").map(|org| org.to_string())
+}
 
 // ServiceSpec Modification Functions
 ////////////////////////////////////////////////////////////////////////
 
-// If the user supplied a --group option, set it on the
-// spec. Otherwise, we inherit the default value in the ServiceSpec,
-// which is "default".
+/// If the user supplied a --group option, set it on the
+/// spec. Otherwise, we inherit the default value in the ServiceSpec,
+/// which is "default".
 fn set_group_from_input(spec: &mut ServiceSpec, m: &ArgMatches) {
     if let Some(g) = m.value_of("GROUP") {
         spec.group = g.to_string();
     }
 }
 
-// If the user provides both --application and --environment options,
-// parse and set the value on the spec. Otherwise, we inherit the
-// default value of the ServiceSpec, which is None
+/// If the user provides both --application and --environment options,
+/// parse and set the value on the spec. Otherwise, we inherit the
+/// default value of the ServiceSpec, which is None
 fn set_app_env_from_input(spec: &mut ServiceSpec, m: &ArgMatches) -> Result<()> {
     if let (Some(app), Some(env)) = (m.value_of("APPLICATION"), m.value_of("ENVIRONMENT")) {
         spec.application_environment = Some(ApplicationEnvironment::new(
@@ -1053,30 +1048,35 @@ fn set_app_env_from_input(spec: &mut ServiceSpec, m: &ArgMatches) -> Result<()> 
     Ok(())
 }
 
-// Set a spec's Builder URL from CLI / environment variables, falling back
-// to a default value.
+/// Set a spec's Builder URL from CLI / environment variables, falling back
+/// to a default value.
 fn set_bldr_url(spec: &mut ServiceSpec, m: &ArgMatches) {
     spec.bldr_url = bldr_url(m);
 }
 
+/// Set a Builder URL only if specified by the user as a CLI argument
+/// or an environment variable.
 fn set_bldr_url_from_input(spec: &mut ServiceSpec, m: &ArgMatches) {
     if let Some(url) = bldr_url_from_input(m) {
         spec.bldr_url = url
     }
 }
 
+/// Set a channel only if specified by the user as a CLI argument.
 fn set_channel_from_input(spec: &mut ServiceSpec, m: &ArgMatches) {
     if let Some(channel) = channel_from_input(m) {
         spec.channel = channel
     }
 }
 
-// Set a spec's channel from CLI values, falling back
-// to a default value.
+/// Set a spec's channel from CLI values, falling back
+/// to a default value.
 fn set_channel(spec: &mut ServiceSpec, m: &ArgMatches) {
     spec.channel = channel(m);
 }
 
+/// Set a topology value only if specified by the user as a CLI
+/// argument.
 fn set_topology_from_input(spec: &mut ServiceSpec, m: &ArgMatches) {
     if let Some(t) = m.value_of("TOPOLOGY") {
         // unwrap() is safe, because the input is validated by
@@ -1085,6 +1085,8 @@ fn set_topology_from_input(spec: &mut ServiceSpec, m: &ArgMatches) {
     }
 }
 
+/// Set an update strategy only if specified by the user as a CLI
+/// argument.
 fn set_strategy_from_input(spec: &mut ServiceSpec, m: &ArgMatches) {
     if let Some(s) = m.value_of("STRATEGY") {
         // unwrap() is safe, because the input is validated by `valid_update_strategy`
@@ -1092,7 +1094,11 @@ fn set_strategy_from_input(spec: &mut ServiceSpec, m: &ArgMatches) {
     }
 }
 
-/// NOTE: binds for composite services should NOT be set using this
+/// Set bind values if given on the command line.
+///
+/// NOTE: At the moment, binds for composite services should NOT be
+/// set using this, as we do not have a mechanism to distinguish
+/// between the different services within the composite.
 fn set_binds_from_input(spec: &mut ServiceSpec, m: &ArgMatches) -> Result<()> {
     if let Some(bind_strs) = m.values_of("BIND") {
         let mut binds = Vec::new();
@@ -1104,6 +1110,11 @@ fn set_binds_from_input(spec: &mut ServiceSpec, m: &ArgMatches) -> Result<()> {
     Ok(())
 }
 
+/// Set a custom config directory if given on the command line.
+///
+/// NOTE: At the moment, this should not be used for composite
+/// services, as we do not have a mechanism to distinguish between the
+/// different services within the composite.
 fn set_config_from_input(spec: &mut ServiceSpec, m: &ArgMatches) -> Result<()> {
     if let Some(ref config_from) = m.value_of("CONFIG_DIR") {
         spec.config_from = Some(PathBuf::from(config_from));
@@ -1132,7 +1143,6 @@ fn set_password_from_input(spec: &mut ServiceSpec, m: &ArgMatches) -> Result<()>
 fn set_password_from_input(_: &mut ServiceSpec, _: &ArgMatches) -> Result<()> {
     Ok(())
 }
-
 
 // ServiceSpec Generation Functions
 ////////////////////////////////////////////////////////////////////////
@@ -1167,12 +1177,10 @@ fn new_service_spec(ident: PackageIdent, m: &ArgMatches) -> Result<ServiceSpec> 
     set_binds_from_input(&mut spec, m)?;
     set_config_from_input(&mut spec, m)?;
     set_password_from_input(&mut spec, m)?;
-
     Ok(spec)
 }
 
 fn update_spec_from_user(mut spec: &mut ServiceSpec, m: &ArgMatches) -> Result<()> {
-
     // The Builder URL and channel have default values; we only want to
     // change them if the user specified something!
     set_bldr_url_from_input(&mut spec, m);
@@ -1190,71 +1198,6 @@ fn update_spec_from_user(mut spec: &mut ServiceSpec, m: &ArgMatches) -> Result<(
 
     Ok(())
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 // CLAP Validation Functions
 ////////////////////////////////////////////////////////////////////////
@@ -1296,7 +1239,6 @@ fn valid_url(val: String) -> result::Result<(), String> {
 }
 
 ////////////////////////////////////////////////////////////////////////
-
 
 fn enable_features_from_env() {
     let features = vec![(feat::List, "LIST")];
@@ -1393,15 +1335,16 @@ fn specs_from_package(
                     // Turn each BindMapping into a ServiceBind and
                     // add them to the spec
                     for bind_mapping in bind_mappings.iter() {
-                        // TODO (CM): Note that this does nothing about
-                        // app/env or organization :(
-                        let service_bind: ServiceBind = format!(
-                            "{}:{}.{}",
-                            &bind_mapping.bind_name,
+                        let group = ServiceGroup::new(
+                            spec.application_environment.as_ref(),
                             &bind_mapping.satisfying_service.name,
-                            &spec.group
-                        ).parse()?;
-
+                            &spec.group, // JUST THE NAME!
+                            organization_from_input(m).as_ref().map(String::as_ref),
+                        )?;
+                        let service_bind = ServiceBind {
+                            name: bind_mapping.bind_name.clone(),
+                            service_group: group,
+                        };
                         service_binds.push(service_bind);
                     }
                     spec.binds = service_binds;

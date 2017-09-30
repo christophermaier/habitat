@@ -4,7 +4,7 @@ load 'helpers'
 
 setup() {
 #    run_only_test "changing an ident when force-loading with an update-strategy of none runs the latest applicable version"
-    run_only_test "a bad strategy value is rejected"
+ #   run_only_test "a bad strategy value is rejected"
     reset_hab_root
 }
 

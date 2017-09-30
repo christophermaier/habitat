@@ -627,19 +627,12 @@ fn sub_unload(m: &ArgMatches) -> Result<()> {
     // then to a composite spec next.
     //
     // HOWEVER this could be weird if you have a standalone service
-    // with the same name as the composite. Hrmm...
+    // with the same name as the composite. Hrmm... This will be
+    // mitigated when we load and unload by service group instead of
+    // package identifier, which will be coming soon.
     let spec_file = Manager::spec_path_by_ident(&cfg, &ident);
     if spec_file.is_file() {
-        outputln!("Unloading {:?}", spec_file);
-
-        // TODO (CM): This currently fails if any of the spec files
-        // don't exist.
-        //
-        // Should we check that they all exist first, treat failure to
-        // remove as "OK", something else?
-        std::fs::remove_file(&spec_file).map_err(|err| {
-            sup_error!(Error::ServiceSpecFileIO(spec_file, err))
-        })?;
+        delete_spec_file(spec_file)?;
     } else {
         let composite_spec_file = Manager::composite_path_by_ident(&cfg, &ident);
         if composite_spec_file.is_file() {
@@ -654,13 +647,11 @@ fn sub_unload(m: &ArgMatches) -> Result<()> {
                 let sf = Manager::spec_path_by_ident(&cfg, service);
                 spec_files.push(sf);
             }
+            // We'll remove the composite file as well
             spec_files.push(composite_spec_file);
 
             for file in spec_files {
-                outputln!("Unloading {:?}", file);
-                std::fs::remove_file(&file).map_err(|err| {
-                    sup_error!(Error::ServiceSpecFileIO(file, err))
-                })?;
+                delete_spec_file(file)?;
             }
 
         } else {
@@ -1256,6 +1247,23 @@ fn enable_features_from_env() {
         }
         outputln!("The Supervisor will start now, enjoy!");
     }
+}
+
+/// Given the path to a spec file, remove it!
+fn delete_spec_file<P>(path: P) -> Result<()>
+where
+    P: AsRef<Path>,
+{
+    // TODO (CM): This currently fails if any of the spec files
+    // don't exist.
+    //
+    // Should we check that they all exist first, treat failure to
+    // remove as "OK", something else?
+    let file = path.as_ref();
+    outputln!("Unloading {:?}", file);
+    std::fs::remove_file(file).map_err(|err| {
+        sup_error!(Error::ServiceSpecFileIO(file.to_path_buf(), err))
+    })
 }
 
 /// Given an installed package, generate a spec (or specs, in the case

@@ -67,8 +67,8 @@ composite_name="builder-tiny"
     done
 }
 
-@test "reload a composite using --force" {
-    run ${hab} svc load "${composite_hart}"
+@test "reload a composite using --force, without changing the composite ident" {
+    run ${hab} svc load --channel=unstable "${composite_hart}"
     assert_success
 
     assert_composite_and_services_are_installed "${composite_ident}"
@@ -82,7 +82,7 @@ composite_name="builder-tiny"
         assert_spec_value "${service_name}" group default
         assert_spec_value "${service_name}" composite "${composite_name}"
         assert_spec_value "${service_name}" start_style persistent
-        assert_spec_value "${service_name}" channel stable
+        assert_spec_value "${service_name}" channel unstable
         assert_spec_value "${service_name}" topology standalone
         assert_spec_value "${service_name}" update_strategy none
         assert_spec_value "${service_name}" desired_state up
@@ -92,7 +92,7 @@ composite_name="builder-tiny"
     # Note that we're reloading *by ident* a composite we loaded from
     # a .hart and it's working; we shouldn't need to go out to Builder
     # just to change specs.
-    run ${hab} svc load --force --channel=unstable "${composite_ident}"
+    run ${hab} svc load --force --group=zzzz "${composite_ident}"
 
     assert_composite_spec "${composite_ident}" # <-- should be same
     for service in $(services_for_composite "${composite_ident}"); do
@@ -100,17 +100,15 @@ composite_name="builder-tiny"
         assert_spec_exists_for "${service_name}"
 
         assert_spec_value "${service_name}" ident "${service}"
-        assert_spec_value "${service_name}" group default
+        assert_spec_value "${service_name}" group zzzz # <-- all should have switched
         assert_spec_value "${service_name}" composite "${composite_name}"
         assert_spec_value "${service_name}" start_style persistent
-        assert_spec_value "${service_name}" channel unstable # <-- all should have switched
+        assert_spec_value "${service_name}" channel unstable
         assert_spec_value "${service_name}" topology standalone
         assert_spec_value "${service_name}" update_strategy none
         assert_spec_value "${service_name}" desired_state up
         assert_spec_value "${service_name}" bldr_url "https://bldr.habitat.sh"
     done
-
-    false # Need to verify that this really behaves properly
 }
 
 @test "unload a composite" {

@@ -533,6 +533,29 @@ fn sub_load(m: &ArgMatches) -> Result<()> {
                     return Ok(());
                 }
                 Spec::Composite(composite_spec) => {
+                    // TODO (CM): For NOW, assume that the ident HAS
+                    // NOT CHANGED
+
+                    let mut specs = installed_specs_from_ident(&cfg, composite_spec.ident())?;
+
+                    // If the composite spec hasn't changed, we're not
+                    // going to be changing anything about the idents
+                    // of the services. Thus we can just update them
+                    // from the user input.
+                    for spec in specs.iter_mut() {
+                        update_spec_from_input(spec, m)?;
+                    }
+
+                    for spec in specs.iter() {
+                        Manager::save_spec_for(&cfg, spec)?;
+                    }
+
+                    outputln!(
+                        "The {} service was successfully loaded",
+                        composite_spec.ident()
+                    );
+                    return Ok(());
+
                     // TODO (CM):  handle reload question here
 
                     // Did the ident change?... Oh, how would we know?
@@ -558,9 +581,6 @@ fn sub_load(m: &ArgMatches) -> Result<()> {
                     // of this before tackling that, eh?
 
 
-                    // load the composite package from disk
-                    let fs_root_path = Path::new(&*fs::FS_ROOT_PATH); // TODO (CM): baaaaarffff
-                    PackageInstall::load(composite_spec.ident(), Some(fs_root_path))?
                 }
             }
         }
@@ -573,7 +593,8 @@ fn sub_load(m: &ArgMatches) -> Result<()> {
     };
 
 
-    // TODO (CM): The code below needs to be pulled up
+    // TODO (CM): The code below needs to be pulled up, probably into
+    // the None arm above
 
     // TODO (CM): Of course, if we don't want to inadvertently change
     // the version, then the original_ident probably needs to be

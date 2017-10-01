@@ -818,6 +818,7 @@ fn sub_stop(m: &ArgMatches) -> Result<()> {
     }
     let cfg = mgrcfg_from_matches(m)?;
 
+    // PKG_IDENT is required, so unwrap() is safe
     let ident = PackageIdent::from_str(m.value_of("PKG_IDENT").unwrap())?;
     let mut specs = match existing_specs_for_ident(&cfg, ident)? {
         Some(Spec::Service(spec)) => vec![spec],
@@ -843,7 +844,6 @@ fn sub_term(m: &ArgMatches) -> Result<()> {
         result => result,
     }
 }
-
 
 // Internal Implementation Details
 ////////////////////////////////////////////////////////////////////////

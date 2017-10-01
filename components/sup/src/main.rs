@@ -489,7 +489,7 @@ fn sub_load(m: &ArgMatches) -> Result<()> {
     // If we've already got a spec for this thing, we don't want to
     // inadvertently download a new version
 
-    let installed = match existing_spec_for_ident(&cfg, install_source.as_ref().clone()) {
+    let installed = match existing_specs_for_ident(&cfg, install_source.as_ref().clone())? {
         Some(spec) => {
             // We've seen this service / composite before. Thus `load`
             // basically acts as a way to edit spec files on the
@@ -534,21 +534,21 @@ fn sub_load(m: &ArgMatches) -> Result<()> {
                     outputln!("The {} service was successfully loaded", service_spec.ident);
                     return Ok(());
                 }
-                Spec::Composite(composite_spec) => {
+                Spec::Composite(composite_spec, mut service_specs) => {
                     // TODO (CM): For NOW, assume that the ident HAS
                     // NOT CHANGED
 
-                    let mut specs = installed_specs_from_ident(&cfg, composite_spec.ident())?;
+                    //                    let mut specs = installed_specs_from_ident(&cfg, composite_spec.ident())?;
 
                     // If the composite spec hasn't changed, we're not
                     // going to be changing anything about the idents
                     // of the services. Thus we can just update them
                     // from the user input.
-                    for spec in specs.iter_mut() {
+                    for spec in service_specs.iter_mut() {
                         update_spec_from_input(spec, m)?;
                     }
 
-                    for spec in specs.iter() {
+                    for spec in service_specs.iter() {
                         Manager::save_spec_for(&cfg, spec)?;
                     }
 
@@ -729,7 +729,7 @@ fn sub_start(m: &ArgMatches, launcher: LauncherCli) -> Result<()> {
     // the spec isn't going to be updated to point to that exact
     // version.
 
-    let updated_specs = match existing_spec_for_ident(&cfg, original_ident.clone()) {
+    let updated_specs = match existing_specs_for_ident(&cfg, original_ident.clone())? {
         Some(Spec::Service(mut spec)) => {
             let mut updated_specs = vec![];
             if spec.desired_state == DesiredState::Down {
@@ -738,9 +738,9 @@ fn sub_start(m: &ArgMatches, launcher: LauncherCli) -> Result<()> {
             }
             updated_specs
         }
-        Some(Spec::Composite(_)) => {
+        Some(Spec::Composite(_, service_specs)) => {
             let mut updated_specs = vec![];
-            for mut spec in installed_specs_from_ident(&cfg, original_ident)? {
+            for mut spec in service_specs {
                 if spec.desired_state == DesiredState::Down {
                     spec.desired_state = DesiredState::Up;
                     updated_specs.push(spec);
@@ -841,7 +841,11 @@ fn sub_stop(m: &ArgMatches) -> Result<()> {
     let cfg = mgrcfg_from_matches(m)?;
 
     let ident = PackageIdent::from_str(m.value_of("PKG_IDENT").unwrap())?;
-    let mut specs = installed_specs_from_ident(&cfg, &ident)?;
+    let mut specs = match existing_specs_for_ident(&cfg, ident)? {
+        Some(Spec::Service(spec)) => vec![spec],
+        Some(Spec::Composite(_, specs)) => specs,
+        None => vec![],
+    };
 
     for spec in specs.iter_mut() {
         spec.desired_state = DesiredState::Down;
@@ -872,7 +876,7 @@ fn sub_term(m: &ArgMatches) -> Result<()> {
 /// ServiceSpecs AND CompositeSpecs will be going away soon anyway.
 enum Spec {
     Service(ServiceSpec),
-    Composite(CompositeSpec),
+    Composite(CompositeSpec, Vec<ServiceSpec>),
 }
 
 impl Spec {
@@ -880,29 +884,47 @@ impl Spec {
     /// which kind it is.
     fn ident(&self) -> &PackageIdent {
         match self {
-            &Spec::Composite(ref s) => s.ident(),
+            &Spec::Composite(ref s, _) => s.ident(),
             &Spec::Service(ref s) => s.ident.as_ref(),
         }
     }
 }
 
-/// Given a package identifier, return the `Spec` for that
-/// package, if it already exists in this supervisor.
-fn existing_spec_for_ident(cfg: &ManagerConfig, ident: PackageIdent) -> Option<Spec> {
+/// Given a `PackageIdent`, return current specs if they exist. If
+/// the package is a standalone service, only that spec will be
+/// returned, but if it is a composite, the composite spec as well as
+/// the specs for all the services in the composite will be returned.
+fn existing_specs_for_ident(cfg: &ManagerConfig, ident: PackageIdent) -> Result<Option<Spec>> {
     let default_spec = ServiceSpec::default_for(ident.clone());
     let spec_file = Manager::spec_path_for(cfg, &default_spec);
 
     // Try it as a service first
     if let Ok(spec) = ServiceSpec::from_file(&spec_file) {
-        Some(Spec::Service(spec))
+        Ok(Some(Spec::Service(spec)))
     } else {
         // Try it as a composite next
         let composite_spec_file = Manager::composite_path_by_ident(&cfg, &ident);
-        // If the file doesn't exist, that'll be an error, which will
-        // convert to None, which is fine
-        CompositeSpec::from_file(composite_spec_file)
-            .and_then(|s| Ok(Spec::Composite(s)))
-            .ok()
+        match CompositeSpec::from_file(composite_spec_file) {
+            Ok(composite_spec) => {
+                let fs_root_path = Path::new(&*fs::FS_ROOT_PATH);
+                let package = PackageInstall::load(&ident, Some(fs_root_path))?;
+
+                let mut specs = vec![];
+
+                let services = package.pkg_services()?;
+                for service in services {
+                    let spec = ServiceSpec::from_file(Manager::spec_path_for(
+                        cfg,
+                        &ServiceSpec::default_for(service),
+                    ))?;
+                    specs.push(spec);
+                }
+
+                Ok(Some(Spec::Composite(composite_spec, specs)))
+            }
+            // Looks like we have no specs for this thing at all
+            Err(_) => Ok(None),
+        }
     }
 }
 
@@ -1484,43 +1506,5 @@ fn generate_new_specs_from_package(
             specs
         }
     };
-    Ok(specs)
-}
-
-/// Given a `PackageIdent` representing something currently running,
-/// return a list of `ServiceSpec`s that correspond to that. Generally,
-/// this will be a single spec if the identifier refers to a standalone
-/// package, but will be multiple if it refers to a composite package.
-fn installed_specs_from_ident(
-    cfg: &ManagerConfig,
-    ident: &PackageIdent,
-) -> Result<Vec<ServiceSpec>> {
-    let mut specs = vec![];
-
-    // Try to resolve it as a standalone service spec first
-
-    match existing_spec_for_ident(cfg, ident.clone()) {
-        Some(Spec::Service(service_spec)) => {
-            specs.push(service_spec);
-        }
-        Some(Spec::Composite(composite_spec)) => {
-
-            // TODO (CM): extract this as a function
-
-            let fs_root_path = Path::new(&*fs::FS_ROOT_PATH);
-            let package = PackageInstall::load(&ident, Some(fs_root_path))?;
-
-            let services = package.pkg_services()?;
-            for service in services {
-                let spec = ServiceSpec::from_file(Manager::spec_path_for(
-                    cfg,
-                    &ServiceSpec::default_for(service),
-                ))?;
-                specs.push(spec);
-            }
-
-        }
-        None => (), // TODO (CM): should this be an error?
-    }
     Ok(specs)
 }

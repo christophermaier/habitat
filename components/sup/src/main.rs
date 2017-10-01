@@ -785,18 +785,27 @@ fn sub_status(m: &ArgMatches) -> Result<()> {
         println!("The Supervisor is not running.");
         process::exit(3);
     }
+
+    // Note that PKG_IDENT is NOT required here
     match m.value_of("PKG_IDENT") {
         Some(pkg) => {
-            match Manager::service_status(cfg, PackageIdent::from_str(pkg)?) {
-                Ok(status) => outputln!("{}", status),
-                Err(_) => {
+            let ident = PackageIdent::from_str(pkg)?;
+            let specs = match existing_specs_for_ident(&cfg, ident)? {
+                Some(Spec::Service(spec)) => vec![spec],
+                Some(Spec::Composite(_, specs)) => specs,
+                None => {
                     println!("{} is not currently loaded.", pkg);
                     process::exit(2);
                 }
+            };
+
+            for spec in specs {
+                let status = Manager::service_status(&cfg, &spec.ident)?;
+                outputln!("{}", status);
             }
         }
         None => {
-            let statuses = Manager::status(cfg)?;
+            let statuses = Manager::status(&cfg)?;
             if statuses.is_empty() {
                 println!("No services loaded.");
                 return Ok(());

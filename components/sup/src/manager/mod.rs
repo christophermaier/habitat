@@ -184,17 +184,17 @@ impl Manager {
         Self::new(cfg, fs_cfg, launcher)
     }
 
-    pub fn service_status(cfg: ManagerConfig, ident: PackageIdent) -> Result<ServiceStatus> {
+    pub fn service_status(cfg: &ManagerConfig, ident: &PackageIdent) -> Result<ServiceStatus> {
         for status in Self::status(cfg)? {
-            if status.pkg.ident.satisfies(&ident) {
+            if status.pkg.ident.satisfies(ident) {
                 return Ok(status);
             }
         }
-        Err(sup_error!(Error::ServiceNotLoaded(ident)))
+        Err(sup_error!(Error::ServiceNotLoaded(ident.clone())))
     }
 
-    pub fn status(cfg: ManagerConfig) -> Result<Vec<ServiceStatus>> {
-        let state_path = Self::state_path_from(&cfg);
+    pub fn status(cfg: &ManagerConfig) -> Result<Vec<ServiceStatus>> {
+        let state_path = Self::state_path_from(cfg);
         let fs_cfg = FsCfg::new(state_path);
 
         let dat = File::open(&fs_cfg.services_data_path)?;

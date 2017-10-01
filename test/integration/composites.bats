@@ -309,3 +309,33 @@ composite_name="builder-tiny"
     assert_spec_value builder-api binds '["router:finn.candykingdom#builder-router.default"]'
     assert_spec_value builder-api-proxy binds '["http:finn.candykingdom#builder-api.default"]'
 }
+
+@test "can load a composite with additional extra-composite binds" {
+    background ${hab} run
+
+    run ${hab} pkg install core/runit --binlink
+    assert_success
+
+    # This is the version of router that was current when the test
+    # composite was built.
+    run ${hab} svc load --group=outside core/builder-router/5131/20170923114145
+    assert_success
+
+    wait_for_service_to_run builder-router
+
+    # Now that the router is present, let's load the API-only
+    # composite. Inside the composite, one service will bind to the
+    # other service, but the other service itself needs to bind to the
+    # router, which is outside the composite.
+    # composite, but
+
+    run ${hab} svc load --bind=builder-api:router:builder-router.outside fixtures/core-builder-api-only-1.0.0-20171001023721-x86_64-linux.hart
+    assert_success
+
+    wait_for_service_to_run builder-api
+    wait_for_service_to_run builder-api-proxy
+
+
+    assert_spec_value builder-api binds '["router:builder-router.outside"]'
+    assert_spec_value builder-api-proxy binds '["http:builder-api.default"]'
+}

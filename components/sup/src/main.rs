@@ -27,6 +27,8 @@ extern crate clap;
 extern crate time;
 extern crate url;
 
+use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 use std::io::{self, Write};
 use std::net::{SocketAddr, ToSocketAddrs};
 use std::path::{Path, PathBuf};
@@ -1127,6 +1129,50 @@ fn set_binds_from_input(spec: &mut ServiceSpec, m: &ArgMatches) -> Result<()> {
     Ok(())
 }
 
+/// THIS IS A TEMPORARY IMPLEMENTATION
+/// When loading a composite, the services within it may require
+/// additional binds that cannot be satisfied by the other services
+/// within the composite.
+///
+/// In this case, we modify the existing bind syntax to allow a user
+/// to specify which service within the composite is to receive the
+/// bind (when you're loading a single service, this is understood to
+/// the be that exact service).
+///
+/// This alternative syntax is "service_name:bind_name:group"
+///
+/// Since the CLI option may contain multiple values, and since they
+/// could each be for different services within the composite, we
+/// construct a map of service name to a vector of ServiceBinds and
+/// return that for subsequent reconciliation with the binds from the
+/// composite.
+fn composite_binds_from_input(m: &ArgMatches) -> Result<HashMap<String, Vec<ServiceBind>>> {
+    let mut map = HashMap::new();
+
+
+    if let Some(bind_strs) = m.values_of("BIND") {
+        for bind_str in bind_strs {
+            outputln!("BIND_STR: {}", bind_str);
+            let parts: Vec<&str> = bind_str.splitn(3, ':').collect();
+            if parts.len() == 3 {
+                outputln!("It's a composite bind");
+                let service_name = parts[0];
+                let bind = format!("{}:{}", parts[1], parts[2]);
+                let mut binds = map.entry(service_name.to_string()).or_insert(vec![]);
+                binds.push(ServiceBind::from_str(&bind)?);
+            }
+            // TODO (CM):
+            // else { error }
+        }
+    }
+
+    Ok(map)
+}
+
+
+
+
+
 /// Set a custom config directory if given on the command line.
 ///
 /// NOTE: At the moment, this should not be used for composite
@@ -1378,6 +1424,8 @@ fn generate_new_specs_from_package(
             let bind_map = package.bind_map()?;
 
             let mut specs: Vec<ServiceSpec> = Vec::with_capacity(services.len());
+            let mut cli_composite_binds = composite_binds_from_input(m)?;
+
             for service in services {
                 outputln!("Found a service: {:?}", service);
                 let mut spec = base_spec.clone();
@@ -1386,9 +1434,6 @@ fn generate_new_specs_from_package(
                 // What else do we need to customize?
                 // - topology?
                 // - update strategy
-                // - optional binds? (we don't even have those yet)
-                // - desired state?
-                // - start style?
 
                 // TODO (CM): Not sure if config has meaning for composites?
                 // set_config_from_input(&mut spec, m)?;
@@ -1425,7 +1470,22 @@ fn generate_new_specs_from_package(
                         };
                         service_binds.push(service_bind);
                     }
+
                     spec.binds = service_binds;
+                }
+
+                if let Entry::Occupied(b) = cli_composite_binds.entry(spec.ident.name.clone()) {
+                    outputln!("FOUND A BIND: {}", spec.ident.name);
+                    let binds = b.remove();
+
+                    // TODO (CM): ideally, we'd want these to
+                    // take precedence over anything in the
+                    // composite, right?
+                    for bind in binds {
+                        spec.binds.push(bind);
+                    }
+                } else {
+                    outputln!("Nothing for {}", spec.ident.name);
                 }
 
                 // TODO (CM) 2017-09-07

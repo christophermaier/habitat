@@ -356,13 +356,6 @@ impl Manager {
         Self::specs_path(&Self::state_path_from(cfg)).join(spec.file_name())
     }
 
-    // TODO (CM): BAAAAARF
-    pub fn spec_path_by_ident(cfg: &ManagerConfig, ident: &PackageIdent) -> PathBuf {
-        let mut p = Self::specs_path(&Self::state_path_from(cfg)).join(&ident.name);
-        p.set_extension("spec");
-        p
-    }
-
     pub fn composite_path_for(cfg: &ManagerConfig, spec: &CompositeSpec) -> PathBuf {
         Self::composites_path(&Self::state_path_from(cfg)).join(spec.file_name())
     }

@@ -709,10 +709,11 @@ fn sub_start(m: &ArgMatches, launcher: LauncherCli) -> Result<()> {
     if m.is_present("NO_COLOR") {
         hcore::output::set_no_color(true);
     }
+
     let cfg = mgrcfg_from_matches(m)?;
 
-    let mut ui = UI::default();
     if !fs::am_i_root() {
+        let mut ui = UI::default();
         ui.warn(
             "Running the Habitat Supervisor with root or superuser privileges is recommended",
         )?;
@@ -728,48 +729,36 @@ fn sub_start(m: &ArgMatches, launcher: LauncherCli) -> Result<()> {
     // the spec isn't going to be updated to point to that exact
     // version.
 
-    let specs = match existing_spec_for_ident(&cfg, original_ident.clone()) {
+    let updated_specs = match existing_spec_for_ident(&cfg, original_ident.clone()) {
         Some(Spec::Service(mut spec)) => {
+            let mut updated_specs = vec![];
             if spec.desired_state == DesiredState::Down {
                 spec.desired_state = DesiredState::Up;
-                vec![spec]
-            } else {
-                return start_supervisor_if_not_running(cfg, launcher);
+                updated_specs.push(spec);
             }
+            updated_specs
         }
         Some(Spec::Composite(_)) => {
-            // Grab all specs of the composite
-            let mut specs = installed_specs_from_ident(&cfg, original_ident)?;
-
-            // If all the specs were already set to "up", then we just
-            // need to start everything. Otherwise, we need to set
-            // everything to "up", and then pass the specs out to be
-            // saved.
-            let mut everything_already_desired_up = true;
-            for spec in specs.iter_mut() {
+            let mut updated_specs = vec![];
+            for mut spec in installed_specs_from_ident(&cfg, original_ident)? {
                 if spec.desired_state == DesiredState::Down {
                     spec.desired_state = DesiredState::Up;
-                    everything_already_desired_up = false;
+                    updated_specs.push(spec);
                 }
             }
-
-            if everything_already_desired_up {
-                return start_supervisor_if_not_running(cfg, launcher);
-            }
-
-            specs
+            updated_specs
         }
         None => {
-            // We have no existing specs, which means we need to go
-            // installing things (but only if we don't have anything
-            // installed already).
-            let bldr_url = bldr_url(m);
-            let channel = channel(m);
-
+            // We don't have any specs for this thing yet, so we'll
+            // need to make some. If we don't already have installed
+            // software that satisfies the given identifier, then
+            // we'll install the latest thing that will
+            // suffice. Otherwise, we'll just use what we find in the
+            // local cache of software.
             let installed_package =
-                install_package_if_not_present(&install_source, &bldr_url, &channel)?;
-
-            let specs = generate_new_specs_from_package(&original_ident, &installed_package, m)?;
+                install_package_if_not_present(&install_source, &bldr_url(m), &channel(m))?;
+            let new_specs =
+                generate_new_specs_from_package(&original_ident, &installed_package, m)?;
 
             // Saving the composite spec here, because we currently
             // need the PackageInstall to create it! It'll only create
@@ -778,25 +767,32 @@ fn sub_start(m: &ArgMatches, launcher: LauncherCli) -> Result<()> {
                 Manager::save_composite_spec_for(&cfg, &composite_spec)?;
             }
 
-            specs
+            new_specs
         }
     };
 
-    for spec in specs.iter() {
+    let specs_changed = updated_specs.len() > 0;
+
+    for spec in updated_specs.iter() {
         Manager::save_spec_for(&cfg, spec)?;
     }
 
     if Manager::is_running(&cfg)? {
-        outputln!(
-            "Supervisor starting {}. See the Supervisor output for more details.",
-            original_ident
-        );
+        if specs_changed {
+            outputln!(
+                "Supervisor starting {}. See the Supervisor output for more details.",
+                original_ident
+            );
+            Ok(())
+        } else {
+            // TODO (CM): somehow, this doesn't actually seem to be
+            // exiting with a non-zero exit code
+            process::exit(OK_NO_RETRY_EXCODE);
+        }
     } else {
         let mut manager = Manager::load(cfg, launcher)?;
-        manager.run()?
+        manager.run()
     }
-
-    Ok(())
 }
 
 fn sub_status(m: &ArgMatches) -> Result<()> {
@@ -1340,15 +1336,6 @@ where
     std::fs::remove_file(file).map_err(|err| {
         sup_error!(Error::ServiceSpecFileIO(file.to_path_buf(), err))
     })
-}
-
-fn start_supervisor_if_not_running(cfg: ManagerConfig, launcher: LauncherCli) -> Result<()> {
-    if !Manager::is_running(&cfg)? {
-        let mut manager = Manager::load(cfg, launcher)?;
-        return manager.run();
-    } else {
-        process::exit(OK_NO_RETRY_EXCODE);
-    }
 }
 
 /// Given an InstallSource, install a new package only if an existing

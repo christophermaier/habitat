@@ -294,7 +294,7 @@ service_is_alive() {
 # has is running yet.
 wait_for_service_to_run() {
     local service_name=${1}
-    retry 30 1 service_is_alive "${service_name}" #bash -c "[ -e /hab/svc/${service_name}/PID ]"
+    retry 30 1 service_is_alive "${service_name}"
 }
 
 pid_has_changed() {

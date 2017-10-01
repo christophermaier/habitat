@@ -218,36 +218,3 @@ teardown() {
     # assert latest redis is installed, though not necessarily
     # *running* (that's for the updater to do)
 }
-
-# TODO (CM): We need to download a new package if there was a change of spec, we
-# don't have a satisfying package, and the new update strategy is NONE
-@test "changing an ident when force-loading with an update-strategy of none runs the latest applicable version" {
-    vsn="core/redis/3.2.3/20160920131015"
-
-    HAB_UPDATE_STRATEGY_FREQUENCY_MS=5000 background ${hab} run
-
-    run ${hab} svc load --channel=unstable "${vsn}"
-    assert_success
-    wait_for_service_to_run redis
-    initial_pid=$(pid_of_service redis)
-
-    assert_spec_value redis ident "${vsn}"
-    assert_spec_value redis channel unstable
-
-    run ${hab} svc load --strategy=none --force core/redis
-    assert_success
-
-    # # This should have downloaded a new version
-    latest_redis=$(latest_from_builder core/redis unstable)
-    # assert_package_and_deps_installed "${latest_redis}"
-
-    wait_for_service_to_restart redis "${initial_pid}"
-
-    # The ident should have changed (among other things)
-    assert_spec_value redis ident core/redis
-    assert_spec_value redis update_strategy none
-    assert_spec_value redis channel unstable
-
-    updated_running_version=$(current_running_version_for redis)
-    assert_equal "$updated_running_version" "${latest_redis}"
-}

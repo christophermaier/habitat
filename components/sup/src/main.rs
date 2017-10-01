@@ -48,7 +48,7 @@ use hcore::env as henv;
 use hcore::fs;
 use hcore::package::PackageIdent;
 use hcore::package::install::PackageInstall;
-use hcore::package::metadata::PackageType;
+use hcore::package::metadata::{BindMapping, PackageType};
 use hcore::service::{ApplicationEnvironment, ServiceGroup};
 use hcore::url::{bldr_url_from_env, default_bldr_url};
 use launcher_client::{LauncherCli, ERR_NO_RETRY_EXCODE, OK_NO_RETRY_EXCODE};
@@ -489,7 +489,39 @@ fn sub_load(m: &ArgMatches) -> Result<()> {
     // If we've already got a spec for this thing, we don't want to
     // inadvertently download a new version
 
-    let installed = match existing_specs_for_ident(&cfg, install_source.as_ref().clone())? {
+    match existing_specs_for_ident(&cfg, install_source.as_ref().clone())? {
+        None => {
+            // We don't have any record of this thing; let's set it
+            // up!
+            //
+            // This will install the latest version from Builder
+            let installed = util::pkg::install(
+                &mut UI::default(),
+                &bldr_url(m),
+                &install_source,
+                &channel(m),
+            )?;
+
+            let original_ident = install_source.as_ref();
+            let mut specs = generate_new_specs_from_package(original_ident, &installed, m)?;
+
+            for spec in specs.iter_mut() {
+                // "load" == persistent services, by definition
+                spec.start_style = StartStyle::Persistent;
+                Manager::save_spec_for(&cfg, spec)?;
+                outputln!("The {} service was successfully loaded", spec.ident);
+            }
+
+            // Only saves a composite spec if it's, well, a composite
+            if let Ok(composite_spec) = CompositeSpec::from_package_install(&installed) {
+                Manager::save_composite_spec_for(&cfg, &composite_spec)?;
+                outputln!(
+                    "The {} composite was successfully loaded",
+                    composite_spec.ident()
+                );
+            }
+            Ok(())
+        }
         Some(spec) => {
             // We've seen this service / composite before. Thus `load`
             // basically acts as a way to edit spec files on the
@@ -505,34 +537,25 @@ fn sub_load(m: &ArgMatches) -> Result<()> {
 
             match spec {
                 Spec::Service(mut service_spec) => {
-                    // If we changed our ident AND we're not going to
-                    // be updating, we HAVE to install a new package
-                    // now to ensure we've got the right code to
-                    // run. Otherwise, we're either good to continue
-                    // running what we've got, or the ServiceUpdater
-                    // will handle things for us.
-                    let ident_changed = install_source.as_ref() != &service_spec.ident;
-
                     service_spec.ident = install_source.as_ref().clone();
                     update_spec_from_input(&mut service_spec, m)?;
-
-                    let strategy_is_none = service_spec.update_strategy == UpdateStrategy::None;
-
-                    if ident_changed && strategy_is_none {
-                        util::pkg::install(
-                            &mut UI::default(),
-                            &service_spec.bldr_url,
-                            &install_source,
-                            &service_spec.channel,
-                        )?;
-                    }
-
                     service_spec.start_style = StartStyle::Persistent;
 
-                    // write the spec
+                    // Only install if we don't have something
+                    // locally; otherwise you could potentially
+                    // upgrade each time you load.
+                    //
+                    // Also make sure you're pulling from where you're
+                    // supposed to be pulling from!
+                    install_package_if_not_present(
+                        &install_source,
+                        &service_spec.bldr_url,
+                        &service_spec.channel,
+                    )?;
+
                     Manager::save_spec_for(&cfg, &service_spec)?;
                     outputln!("The {} service was successfully loaded", service_spec.ident);
-                    return Ok(());
+                    Ok(())
                 }
                 Spec::Composite(composite_spec, mut service_specs) => {
                     // TODO (CM): For NOW, assume that the ident HAS
@@ -544,6 +567,10 @@ fn sub_load(m: &ArgMatches) -> Result<()> {
                     // going to be changing anything about the idents
                     // of the services. Thus we can just update them
                     // from the user input.
+
+                    // TODO (CM): update_spec_from_input DOES NOT TAKE
+                    // INTO ACCOUNT BINDS
+
                     for spec in service_specs.iter_mut() {
                         update_spec_from_input(spec, m)?;
                     }
@@ -556,7 +583,7 @@ fn sub_load(m: &ArgMatches) -> Result<()> {
                         "The {} service was successfully loaded",
                         composite_spec.ident()
                     );
-                    return Ok(());
+                    Ok(())
 
                     // TODO (CM):  handle reload question here
 
@@ -586,45 +613,7 @@ fn sub_load(m: &ArgMatches) -> Result<()> {
                 }
             }
         }
-        None => {
-            // We've not seen this before; TO THE BUILDER-MOBILE!
-            let bldr_url = bldr_url(m);
-            let channel = channel(m);
-            util::pkg::install(&mut UI::default(), &bldr_url, &install_source, &channel)?
-        }
-    };
-
-
-    // TODO (CM): The code below needs to be pulled up, probably into
-    // the None arm above
-
-    // TODO (CM): Of course, if we don't want to inadvertently change
-    // the version, then the original_ident probably needs to be
-    // whatever was in the spec to begin with... and that, of course,
-    // only applies to standalones, not composites, since *their*
-    // idents are baked in.
-    let original_ident = install_source.as_ref();
-    let mut specs = generate_new_specs_from_package(original_ident, &installed, m)?;
-
-    // If this is an error, then it wasn't a composite :P
-    // TODO (CM): Is there a better place to put this / better way to
-    // express this? I'd like to keep as much special logic out of
-    // this as possible...
-
-    // TODO (CM): pull this up? Don't want to inadvertently change the
-    // spec if it was already installed... or do we? :thinking_face:
-    if let Ok(composite_spec) = CompositeSpec::from_package_install(&installed) {
-        Manager::save_composite_spec_for(&cfg, &composite_spec)?;
     }
-
-    for spec in specs.iter_mut() {
-        // When you "load" services, that indicates that you want them
-        // to be permanent. By default, they're transient.
-        spec.start_style = StartStyle::Persistent;
-        Manager::save_spec_for(&cfg, spec)?;
-        outputln!("The {} service was successfully loaded", spec.ident);
-    }
-    Ok(())
 }
 
 fn sub_unload(m: &ArgMatches) -> Result<()> {
@@ -1134,7 +1123,6 @@ fn set_binds_from_input(spec: &mut ServiceSpec, m: &ArgMatches) -> Result<()> {
     Ok(())
 }
 
-/// THIS IS A TEMPORARY IMPLEMENTATION
 /// When loading a composite, the services within it may require
 /// additional binds that cannot be satisfied by the other services
 /// within the composite.
@@ -1151,32 +1139,33 @@ fn set_binds_from_input(spec: &mut ServiceSpec, m: &ArgMatches) -> Result<()> {
 /// construct a map of service name to a vector of ServiceBinds and
 /// return that for subsequent reconciliation with the binds from the
 /// composite.
+// TODO (CM): consider making a new type for this return value
+// TODO (CM): Consolidate this with non-composite bind processing;
+// don't want composite binds showing up in non-composite services and vice-versa
 fn composite_binds_from_input(m: &ArgMatches) -> Result<HashMap<String, Vec<ServiceBind>>> {
     let mut map = HashMap::new();
 
-
     if let Some(bind_strs) = m.values_of("BIND") {
         for bind_str in bind_strs {
-            outputln!("BIND_STR: {}", bind_str);
             let parts: Vec<&str> = bind_str.splitn(3, ':').collect();
             if parts.len() == 3 {
-                outputln!("It's a composite bind");
+                // It's a composite bind
                 let service_name = parts[0];
                 let bind = format!("{}:{}", parts[1], parts[2]);
                 let mut binds = map.entry(service_name.to_string()).or_insert(vec![]);
                 binds.push(ServiceBind::from_str(&bind)?);
+            } else {
+                // You supplied a 2-part (i.e., standalone service)
+                // bind when trying to set up a composite!
+                return Err(sup_error!(
+                    Error::InvalidCompositeBinding(bind_str.to_string())
+                ));
             }
-            // TODO (CM):
-            // else { error }
         }
     }
 
     Ok(map)
 }
-
-
-
-
 
 /// Set a custom config directory if given on the command line.
 ///
@@ -1230,6 +1219,7 @@ fn set_password_from_input(_: &mut ServiceSpec, _: &ArgMatches) -> Result<()> {
 //
 ////////////////////////////////////////////////////////////////////////
 
+// Only use this for standalone services!
 fn new_service_spec(ident: PackageIdent, m: &ArgMatches) -> Result<ServiceSpec> {
     let mut spec = ServiceSpec::default_for(ident);
 
@@ -1240,8 +1230,6 @@ fn new_service_spec(ident: PackageIdent, m: &ArgMatches) -> Result<ServiceSpec> 
     set_group_from_input(&mut spec, m);
     set_strategy_from_input(&mut spec, m);
     set_topology_from_input(&mut spec, m);
-
-    // TODO (CM): Remove these for composite-member specs
     set_binds_from_input(&mut spec, m)?;
     set_config_from_input(&mut spec, m)?;
     set_password_from_input(&mut spec, m)?;
@@ -1264,6 +1252,120 @@ fn update_spec_from_input(mut spec: &mut ServiceSpec, m: &ArgMatches) -> Result<
     set_config_from_input(&mut spec, m)?;
     set_password_from_input(&mut spec, m)?;
 
+    Ok(())
+}
+
+/// All specs in a composite currently share a lot of the same
+/// information. Here, we create a "base spec" that we can clone and
+/// further customize for each individual service as needed.
+fn base_composite_service_spec(composite_name: &str, m: &ArgMatches) -> Result<ServiceSpec> {
+    let mut spec = ServiceSpec::default();
+
+    // All the composite's services are in the same composite,
+    // tautologically enough!
+    spec.composite = Some(composite_name.to_string());
+
+    // All services will pull from the same channel in the same
+    // Builder instance
+    set_bldr_url(&mut spec, m);
+    set_channel(&mut spec, m);
+
+    // All services will be in the same group and app/env. Binds among
+    // the composite's services are generated based on this
+    // assumption.
+    //
+    // (We do not set binds here, though, because that requires
+    // specialized, service-specific handling.)
+    set_app_env_from_input(&mut spec, m)?;
+    set_group_from_input(&mut spec, m);
+
+    // For now, all a composite's services will also share the same
+    // update strategy and topology, though we may want to revisit
+    // this in the future (particularly for topology).
+    set_strategy_from_input(&mut spec, m);
+    set_topology_from_input(&mut spec, m);
+
+    // TODO (CM): Not dealing with service passwords for now, since
+    // that's a Windows-only feature, and we don't currently build
+    // Windows composites yet. And we don't have a nice way target
+    // them on a per-service basis.
+
+    // TODO (CM): Not setting the dev-mode service config_from value
+    // because we don't currently have a nice way to target them on a
+    // per-service basis.
+
+    Ok(spec)
+}
+
+/// Generate the binds for a composite's service, taking into account
+/// both the values laid out in composite definition and any CLI value
+/// the user may have specified. This allows the user to override a
+/// composite-defined bind, but also (perhaps more usefully) to
+/// declare binds for services within the composite that are not
+/// themselves *satisfied* by other members of the composite.
+///
+/// The final list of bind mappings is generated and then set in the
+/// `ServiceSpec`. Any binds that may have been present in the spec
+/// before are completely ignored.
+///
+/// # Parameters
+///
+/// * bind_map: output of package.bind_map()
+/// * cli_binds: per-service overrides given on the CLI
+fn set_composite_binds(
+    spec: &mut ServiceSpec,
+    bind_map: &HashMap<PackageIdent, Vec<BindMapping>>,
+    cli_binds: &mut HashMap<String, Vec<ServiceBind>>,
+) -> Result<()> {
+
+    // We'll be layering bind specifications from the composite
+    // with any additional ones from the CLI. We'll store them here,
+    // keyed to the bind name
+    let mut final_binds: HashMap<String, ServiceBind> = HashMap::new();
+
+    // First, generate the binds from the composite
+    if let Some(bind_mappings) = bind_map.get(&spec.ident) {
+        // Turn each BindMapping into a ServiceBind
+
+        // NOTE: We are explicitly NOT generating binds that include
+        // "organization". This is a feature that never quite found
+        // its footing, and will likely be removed / greatly
+        // overhauled Real Soon Now (TM) (as of September 2017).
+        //
+        // As it exists right now, "organization" is a supervisor-wide
+        // setting, and thus is only available for `hab sup run` and
+        // `hab svc start`. We don't have a way from `hab svc load` to
+        // access the organization setting of an active supervisor,
+        // and so we can't generate binds that include organizations.
+        for bind_mapping in bind_mappings.iter() {
+            let group = ServiceGroup::new(
+                spec.application_environment.as_ref(),
+                &bind_mapping.satisfying_service.name,
+                &spec.group,
+                None, // <-- organization
+            )?;
+            let bind = ServiceBind {
+                name: bind_mapping.bind_name.clone(),
+                service_group: group,
+            };
+            final_binds.insert(bind.name.clone(), bind);
+        }
+    }
+
+    // If anything was overridden or added on the CLI, layer that on
+    // now as well. These will take precedence over anything in the
+    // composite itself.
+    //
+    // Note that it consumes the values from cli_binds
+    if let Entry::Occupied(b) = cli_binds.entry(spec.ident.name.clone()) {
+        let binds = b.remove();
+        for bind in binds {
+            final_binds.insert(bind.name.clone(), bind);
+        }
+    }
+
+    // Now take all the ServiceBinds we've collected.
+    spec.binds = final_binds.drain().map(|(_, v)| v).collect();
     Ok(())
 }
 
@@ -1366,111 +1468,20 @@ fn generate_new_specs_from_package(
         PackageType::Composite => {
             let composite_name = &package.ident().name;
 
-            // All specs in a composite currently share a lot of the
-            // same information. Here, we create a "base spec" that we
-            // can clone and further customize for each individual
-            // service as needed.
-            //
-            // (Note that once we're done setting it up, base_spec is
-            // intentionally immutable.)
-            let base_spec = {
+            // All the service specs will be customized copies of
+            // this.
+            let base_spec = base_composite_service_spec(composite_name, m)?;
 
-                // TODO (CM): would like to use new_service_spec if possible
-
-                let mut spec = ServiceSpec::default();
-                set_bldr_url(&mut spec, m);
-                set_channel(&mut spec, m);
-
-                set_app_env_from_input(&mut spec, m)?;
-                set_group_from_input(&mut spec, m);
-                set_strategy_from_input(&mut spec, m);
-                set_topology_from_input(&mut spec, m);
-
-                // TODO (CM): does this also need to be the same for
-                // everything?
-                // NOOOOOOO
-                set_password_from_input(&mut spec, m)?;
-
-                // TODO (CM): unset binds
-                // TODO (CM): unset config?
-                // TODO (CM): unset password?
-
-                spec.composite = Some(composite_name.to_string());
-                spec
-            };
-
-            let services = package.pkg_services()?;
             let bind_map = package.bind_map()?;
-
-            let mut specs: Vec<ServiceSpec> = Vec::with_capacity(services.len());
             let mut cli_composite_binds = composite_binds_from_input(m)?;
 
+            let services = package.pkg_services()?;
+            let mut specs: Vec<ServiceSpec> = Vec::with_capacity(services.len());
             for service in services {
-                outputln!("Found a service: {:?}", service);
+                // Customize each service's spec as appropriate
                 let mut spec = base_spec.clone();
                 spec.ident = service;
-
-                // What else do we need to customize?
-                // - topology?
-                // - update strategy
-
-                // TODO (CM): Not sure if config has meaning for composites?
-                // set_config_from_input(&mut spec, m)?;
-                if let Some(bind_mappings) = bind_map.get(&spec.ident) {
-                    let mut service_binds = Vec::with_capacity(bind_mappings.len());
-
-                    // Turn each BindMapping into a ServiceBind and
-                    // add them to the spec
-                    for bind_mapping in bind_mappings.iter() {
-                        let group = ServiceGroup::new(
-                            spec.application_environment.as_ref(),
-                            &bind_mapping.satisfying_service.name,
-                            &spec.group,
-                            // NOTE: We are explicitly NOT generating
-                            // binds that include "organization". This
-                            // is a feature that never quite found its
-                            // footing, and will likely be removed /
-                            // greatly overhauled Real Soon Now (TM)
-                            // (as of September 2017).
-                            //
-                            // As it exists right now, "organization"
-                            // is a supervisor-wide setting, and thus
-                            // is only available for `hab sup run` and
-                            // `hab svc start`. We don't have a way
-                            // from `hab svc load` to access the
-                            // organization setting of an active
-                            // supervisor, and so we can't generate
-                            // binds that include organizations.
-                            None,
-                        )?;
-                        let service_bind = ServiceBind {
-                            name: bind_mapping.bind_name.clone(),
-                            service_group: group,
-                        };
-                        service_binds.push(service_bind);
-                    }
-
-                    spec.binds = service_binds;
-                }
-
-                if let Entry::Occupied(b) = cli_composite_binds.entry(spec.ident.name.clone()) {
-                    outputln!("FOUND A BIND: {}", spec.ident.name);
-                    let binds = b.remove();
-
-                    // TODO (CM): ideally, we'd want these to
-                    // take precedence over anything in the
-                    // composite, right?
-                    for bind in binds {
-                        spec.binds.push(bind);
-                    }
-                } else {
-                    outputln!("Nothing for {}", spec.ident.name);
-                }
-
-                // TODO (CM) 2017-09-07
-                // Add a unit test for reading TYPE (ensure
-                // default value when file isn't present!), and
-                // SERVICES (they can have non-fully-qualified ids)
+                set_composite_binds(&mut spec, &bind_map, &mut cli_composite_binds)?;
                 specs.push(spec);
             }
             specs

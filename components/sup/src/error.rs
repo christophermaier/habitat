@@ -124,6 +124,7 @@ pub enum Error {
     TemplateRenderError(handlebars::RenderError),
     InvalidBinding(String),
     InvalidBinds(Vec<String>),
+    InvalidCompositeBinding(String),
     InvalidKeyParameter(String),
     InvalidPidFile,
     InvalidTopology(String),
@@ -232,6 +233,14 @@ impl fmt::Display for SupError {
                 )
             }
             Error::InvalidBinds(ref e) => format!("Invalid bind(s), {}", e.join(", ")),
+            Error::InvalidCompositeBinding(ref binding) => {
+                format!(
+                    "Invalid binding \"{}\", must be of the form <SERVICE_NAME>:<NAME>:<SERVICE_GROUP> where \
+                     <SERVICE_NAME> is the name of a service within the composite, <NAME> is a bind name for \
+                     that service, and <SERVICE_GROUP> is a valid service group",
+                    binding
+                )
+            }
             Error::InvalidKeyParameter(ref e) => {
                 format!("Invalid parameter for key generation: {:?}", e)
             }
@@ -366,6 +375,7 @@ impl error::Error for SupError {
             Error::InvalidBinds(_) => {
                 "Service binds detected that are neither required nor optional package binds"
             }
+            Error::InvalidCompositeBinding(_) => "Invalid binding parameter",
             Error::InvalidKeyParameter(_) => "Key parameter error",
             Error::InvalidPidFile => "Invalid child process PID file",
             Error::InvalidTopology(_) => "Invalid topology",

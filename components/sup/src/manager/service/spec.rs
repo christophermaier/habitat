@@ -272,7 +272,7 @@ impl FromStr for ServiceBind {
     type Err = SupError;
 
     fn from_str(bind_str: &str) -> result::Result<Self, Self::Err> {
-        let values: Vec<&str> = bind_str.splitn(2, ':').collect();
+        let values: Vec<&str> = bind_str.split(':').collect();
         if values.len() != 2 {
             return Err(sup_error!(Error::InvalidBinding(bind_str.to_string())));
         }

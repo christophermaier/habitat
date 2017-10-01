@@ -392,8 +392,6 @@ composite_name="builder-tiny"
     # composite. Inside the composite, one service will bind to the
     # other service, but the other service itself needs to bind to the
     # router, which is outside the composite.
-    # composite, but
-
     run ${hab} svc load --bind=builder-api:router:builder-router.outside fixtures/core-builder-api-only-1.0.0-20171001023721-x86_64-linux.hart
     assert_success
 
@@ -403,4 +401,29 @@ composite_name="builder-tiny"
 
     assert_spec_value builder-api binds '["router:builder-router.outside"]'
     assert_spec_value builder-api-proxy binds '["http:builder-api.default"]'
+}
+
+@test "two-part binds on the CLI are not accepted for composites" {
+
+    # This is the version of router that was current when the test
+    # composite was built.
+    run ${hab} svc load --group=outside core/builder-router/5131/20170923114145
+    assert_success
+
+    run ${hab} svc load \
+        --bind=router:builder-router.outside \
+        fixtures/core-builder-api-only-1.0.0-20171001023721-x86_64-linux.hart
+    assert_failure
+    assert_line --partial 'Invalid binding "router:builder-router.outside"'
+}
+
+# This is tangentially related to composites, in that the notion of
+# 3-part binds came in with composites.
+@test "three-part binds on the CLI are not accepted for standalone services" {
+    # This particular version of builder-api has a single bind: "router"
+    run ${hab} svc load \
+        --bind=builder-api:router:builder-router.default \
+        core/builder-api/5326/20170930215921
+    assert_failure
+    assert_line --partial 'Invalid binding "builder-api:router:builder-router.default"'
 }

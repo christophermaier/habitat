@@ -228,7 +228,7 @@ impl PackageInstall {
         match self.read_metafile(MetaFile::Type) {
             Ok(body) => body.parse(),
             Err(Error::MetaFileNotFound(MetaFile::Type)) => Ok(PackageType::Standalone),
-            Err(e) => Err(e)
+            Err(e) => Err(e),
         }
     }
 

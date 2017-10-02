@@ -2292,9 +2292,6 @@ cd "$PLAN_CONTEXT"
 # plan.sh in existence before composite plans were a thing :)
 declare -g pkg_type="standalone"
 declare -A -g pkg_bind_map
-declare -A -g pkg_sets
-# TODO (CM): Set default value for pkg_set_default here (none)?
-
 
 # Load the Plan
 build_line "Loading $PLAN_CONTEXT/plan.sh"
@@ -2484,7 +2481,7 @@ case "${pkg_type}" in
         exit_with "'${pkg_type}' is not a recognized package type"
 esac
 
-# Common processing for both composite and individual packages
+# Common processing for both composite and standalone packages
 
 # Write the manifest
 _build_manifest

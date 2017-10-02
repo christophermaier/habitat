@@ -1,3 +1,5 @@
+# These functions are used when building a composite package.
+
 # Ensure that a composite package is internally consistent.
 _validate_composite() {
     _assert_more_than_one_service
@@ -7,22 +9,9 @@ _validate_composite() {
     # Validate all the bind mappings
     _resolve_all_exports
     _validate_bind_mappings
-    # TODO (CM): handle optional binds?
-
-    # Validate the sets
-    _validate_pkg_sets
 }
 
-
-
-# TODO (CM): Add a helper function to assert that required global
-# variables are present and set.
-
-
 # TODO (CM): normalize names (assert/validate/ensure?)
-
-
-
 
 # Create global variable for mapping a service name as given in plan.sh to
 # the path-on-disk of the fully-qualified service that is resolved at plan
@@ -87,8 +76,7 @@ _resolve_service_dependencies() {
 _validate_services() {
     local resolved
 
-    for rs in "${!resolved_services[@]}"
-    do
+    for rs in "${!resolved_services[@]}"; do
         resolved=${resolved_services[$rs]}
         _assert_package_is_a_service "${resolved}"
     done
@@ -150,7 +138,7 @@ _resolve_all_exports() {
 # * The package that satisfies the bind actually exports what the bind requires
 _validate_bind_mappings() {
   for pkg in "${!pkg_bind_map[@]}"; do
-    warn "Resolving binds for ${pkg}"
+    debug "Resolving binds for ${pkg}"
 
     # TODO (CM): Here we are implicitly assuming that the values # in the
     # pkg_bind_map are exactly the same as given in # pkg_services. Is this
@@ -170,7 +158,6 @@ _validate_bind_mappings() {
 
     unset bind_mappings
     bind_mappings=("${pkg_bind_map[$pkg]}")
-    warn "BIND MAPPINGS: ${bind_mappings[@]}"
 
     # This is space-delimited, so no quotes
     for mapping in ${bind_mappings[@]}; do
@@ -198,7 +185,6 @@ _validate_bind_mappings() {
       # Assert that the mapped service satisfies all the exports
       # of this bind
       for required_exported_value in ${all_binds_for_pkg[$bind_name][@]}; do
-        debug "REQUIRED EXPORTED VALUE FOR ${bind_name}: ${required_exported_value}"
         if ! _array_contains "$required_exported_value" ${satisfying_package_exports[@]}; then
           exit_with "${satisfying_package} does not export '${required_exported_value}', which is required by the '${bind_name}' bind of ${resolved}"
         fi
@@ -206,36 +192,6 @@ _validate_bind_mappings() {
     done
   done
 }
-
-# Each set must consist of services listed in `pkg_services`
-_validate_pkg_sets() {
-  local set
-  local member
-
-  for set in "${!pkg_sets[@]}"; do
-    # The value of pkg_sets is a space-delimited string of entries, so don't quote
-    for member in ${pkg_sets[$set]}; do
-      if ! _array_contains "${member}" "${pkg_services[@]}"; then
-        exit_with "Service set '$set' has '$member' as a member, but this was not listed in \$pkg_services"
-      fi
-    done
-  done
-}
-
-# TODO (CM): Validate the default set is actually a set
-# TODO (CM): Do we default to everything being a set? Write that into
-# the metadata file?
-#
-# YES, we should default to everything. Builder is special in that
-# it's one big system, as opposed to a service with its sidecars. In
-# the latter case, of course you'll want to run all of them at once;
-# why should you need to specify that?
-#
-# Maybe if you supply no sets, we default to everything. Adding sets
-# can come later.
-#
-# TODO (CM): Should all services be accounted for in the union of all sets?
-# TODO (CM): Should we allow one-member sets?
 
 ################################################################################
 # Composite Package Metadata Rendering functions
@@ -245,7 +201,6 @@ _render_composite_metadata() {
 
     _render_metadata_BIND_MAP
     _render_metadata_RESOLVED_SERVICES
-    _render_metadata_SERVICE_SETS
     _render_metadata_SERVICES
 
     # TODO (CM): Consider renaming to reflect "common" metadata, or
@@ -270,16 +225,12 @@ _render_metadata_SERVICES() {
   fi
 }
 
-# Render the services AS RESOLVED... this is just for human understanding
+# Render the services AS RESOLVED at build time; when you install the
+# composite, these are the releases that will be downloaded.
 _render_metadata_RESOLVED_SERVICES() {
     _render_dependency_metadata_file $pkg_prefix RESOLVED_SERVICES resolved_services
 }
 
 _render_metadata_BIND_MAP() {
   _render_associative_array_file ${pkg_prefix} BIND_MAP pkg_bind_map
-}
-
-_render_metadata_SERVICE_SETS() {
-  _render_associative_array_file ${pkg_prefix} SERVICE_SETS pkg_sets
-  # TODO (CM): Where to put the default set?
 }

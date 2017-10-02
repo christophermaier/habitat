@@ -3,7 +3,6 @@
 # These functions are supported by the Habitat project, and can be used in your
 # own plan.sh files.
 
-
 # Check that the command exists, 0 if it does, 1 if it does not.
 #
 # ```sh
@@ -74,9 +73,8 @@ warn() {
 # debug "Not so much anymore"
 # ```
 #
-# TODO (CM): This should output to stderr instead of stdout
 debug() {
-  if [[ -n "$HAB_DEBUG" ]]; then
+  if [[ -n "$DEBUG" ]]; then
     echo "DEBUG: $1"
   fi
   return 0

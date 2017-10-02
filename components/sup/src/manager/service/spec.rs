@@ -110,6 +110,8 @@ pub struct ServiceSpec {
             serialize_with = "serialize_using_to_string")]
     pub start_style: StartStyle,
     pub svc_encrypted_password: Option<String>,
+    // The name of the composite this service is a part of
+    pub composite: Option<String>,
 }
 
 impl ServiceSpec {
@@ -241,6 +243,7 @@ impl Default for ServiceSpec {
             desired_state: DesiredState::default(),
             start_style: StartStyle::default(),
             svc_encrypted_password: None,
+            composite: None,
         }
     }
 }
@@ -269,7 +272,7 @@ impl FromStr for ServiceBind {
     type Err = SupError;
 
     fn from_str(bind_str: &str) -> result::Result<Self, Self::Err> {
-        let values: Vec<&str> = bind_str.splitn(2, ':').collect();
+        let values: Vec<&str> = bind_str.split(':').collect();
         if values.len() != 2 {
             return Err(sup_error!(Error::InvalidBinding(bind_str.to_string())));
         }

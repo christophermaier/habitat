@@ -40,6 +40,11 @@ assert_spec_exists_for() {
     assert_file_exist $(spec_file_for ${service_name})
 }
 
+assert_spec_not_exists_for() {
+    local service_name=${1}
+    assert_file_not_exist $(spec_file_for ${service_name})
+}
+
 # Given a fully-qualified package identifer, assert that the package has been
 # installed.
 #
@@ -102,15 +107,14 @@ assert_spec_value() {
     local expected=${3}
 
     local spec=$(spec_file_for ${service})
-    run grep ${key} ${spec}
+    run grep "${key} = " ${spec}
     assert_success
-
 
     if [ "${key}" = "binds" ]; then
         # Binds are an array, and so shouldn't be quoted
-        assert_equal "${output}" "${key} = ${expected}"
+        assert_line "${key} = ${expected}"
     else
-        assert_equal "${output}" "${key} = \"${expected}\""
+        assert_line "${key} = \"${expected}\""
     fi
 }
 
@@ -123,7 +127,7 @@ assert_composite_spec() {
 
     local composite_spec=$(composite_spec_file_for "${composite_name}")
     assert_file_exist "${composite_spec}"
-    assert_composite_spec_value "${composite_name}" ident "${composite_ident}"
+    assert_composite_spec_value "${composite_name}" package_ident "${composite_ident}"
 }
 
 # Just like `assert_spec_value`, but for composites.
@@ -134,10 +138,9 @@ assert_composite_spec_value() {
     local expected=${3}
 
     local spec=$(composite_spec_file_for ${composite})
-    run grep ${key} ${spec}
+    run grep "${key} = " ${spec}
     assert_success
-
-    assert_equal "${output}" "${key} = \"${expected}\""
+    assert_line "${key} = \"${expected}\""
 }
 
 # When installing a composite, assert that every service described in

@@ -27,7 +27,7 @@ extern crate clap;
 extern crate time;
 extern crate url;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::collections::hash_map::Entry;
 use std::io::{self, Write};
 use std::net::{SocketAddr, ToSocketAddrs};
@@ -513,7 +513,9 @@ fn sub_load(m: &ArgMatches) -> Result<()> {
             }
 
             // Only saves a composite spec if it's, well, a composite
-            if let Ok(composite_spec) = CompositeSpec::from_package_install(&installed) {
+            if let Ok(composite_spec) =
+                CompositeSpec::from_package_install(&original_ident, &installed)
+            {
                 Manager::save_composite_spec_for(&cfg, &composite_spec)?;
                 outputln!(
                     "The {} composite was successfully loaded",
@@ -557,25 +559,22 @@ fn sub_load(m: &ArgMatches) -> Result<()> {
                     outputln!("The {} service was successfully loaded", service_spec.ident);
                     Ok(())
                 }
-                Spec::Composite(composite_spec, mut service_specs) => {
-                    // TODO (CM): need to compare against the id the
-                    // spec was saved with instead
+                Spec::Composite(composite_spec, mut existing_service_specs) => {
                     if install_source.as_ref() == composite_spec.ident() {
-
-
-                        // TODO (CM): For NOW, assume that the composite
-                        // ident HAS NOT CHANGED
-
                         let composite_package =
-                            match util::pkg::installed(composite_spec.ident()) {
+                            match util::pkg::installed(composite_spec.package_ident()) {
                                 Some(package) => package,
                                 // TODO (CM): this should be a proper error
                                 None => unreachable!(), 
                             };
 
-                        update_composite_service_specs(&mut service_specs, &composite_package, m)?;
+                        update_composite_service_specs(
+                            &mut existing_service_specs,
+                            &composite_package,
+                            m,
+                        )?;
 
-                        for service_spec in service_specs.iter() {
+                        for service_spec in existing_service_specs.iter() {
                             Manager::save_spec_for(&cfg, service_spec)?;
                             outputln!("The {} service was successfully loaded", service_spec.ident);
                         }
@@ -585,7 +584,79 @@ fn sub_load(m: &ArgMatches) -> Result<()> {
                         );
                     } else {
                         // It changed!
-                        // TODO (CM): this!
+                        // OK, here's the deal.
+                        //
+                        // We're going to install a new composite if
+                        // we need to in order to satisfy the spec
+                        // we've now got. That also means that the
+                        // services that are currently running may get
+                        // unloaded (because they are no longer in the
+                        // composite), and new services may start
+                        // (because they were added to the composite).
+
+                        let installed_package = install_package_if_not_present(
+                            &install_source,
+                            // This (updating from the command-line
+                            // args) is a difference from
+                            // force-loading a spec, because
+                            // composites don't auto-update themselves
+                            // like services can.
+                            &bldr_url(m),
+                            &channel(m),
+                        )?;
+
+                        // Generate new specs from the new composite package and
+                        // CLI inputs
+                        let new_service_specs = generate_new_specs_from_package(
+                            install_source.as_ref(),
+                            &installed_package,
+                            m,
+                        )?;
+
+                        // Delete any specs that are not in the new
+                        // composite
+                        let mut old_spec_names = HashSet::new();
+                        for s in existing_service_specs.iter() {
+                            old_spec_names.insert(s.ident.name.clone());
+                        }
+                        let mut new_spec_names = HashSet::new();
+                        for s in new_service_specs.iter() {
+                            new_spec_names.insert(s.ident.name.clone());
+                        }
+
+                        let specs_to_delete: HashSet<_> =
+                            old_spec_names.difference(&new_spec_names).collect();
+                        for spec in existing_service_specs.iter() {
+                            if specs_to_delete.contains(&spec.ident.name) {
+                                let file = Manager::spec_path_for(&cfg, spec);
+                                outputln!("Unloading {:?}", file);
+                                std::fs::remove_file(&file).map_err(|err| {
+                                    sup_error!(Error::ServiceSpecFileIO(file, err))
+                                })?;
+                            }
+                        }
+                        // <-- end of deletion
+
+                        // Save all the new specs. If there are
+                        // services that exist in both composites,
+                        // their service spec files will have the same
+                        // name, so they'll be taken care of here (we
+                        // don't need to treat them differently)
+                        for spec in new_service_specs.iter() {
+                            Manager::save_spec_for(&cfg, spec)?;
+                            outputln!("The {} service was successfully loaded", spec.ident);
+                        }
+
+                        // Generate and save the new spec
+                        let new_composite_spec = CompositeSpec::from_package_install(
+                            install_source.as_ref(),
+                            &installed_package,
+                        )?;
+                        Manager::save_composite_spec_for(&cfg, &new_composite_spec)?;
+                        outputln!(
+                            "The {} composite was successfully loaded",
+                            new_composite_spec.ident()
+                        );
                     }
                     Ok(())
                 }
@@ -708,7 +779,9 @@ fn sub_start(m: &ArgMatches, launcher: LauncherCli) -> Result<()> {
             // Saving the composite spec here, because we currently
             // need the PackageInstall to create it! It'll only create
             // a composite spec if the package is itself a composite.
-            if let Ok(composite_spec) = CompositeSpec::from_package_install(&installed_package) {
+            if let Ok(composite_spec) =
+                CompositeSpec::from_package_install(&original_ident, &installed_package)
+            {
                 Manager::save_composite_spec_for(&cfg, &composite_spec)?;
             }
 
@@ -861,8 +934,8 @@ fn existing_specs_for_ident(cfg: &ManagerConfig, ident: PackageIdent) -> Result<
         match CompositeSpec::from_file(composite_spec_file) {
             Ok(composite_spec) => {
                 let fs_root_path = Path::new(&*fs::FS_ROOT_PATH);
-                let package = PackageInstall::load(&ident, Some(fs_root_path))?;
-
+                let package =
+                    PackageInstall::load(composite_spec.package_ident(), Some(fs_root_path))?;
                 let mut specs = vec![];
 
                 let services = package.pkg_services()?;

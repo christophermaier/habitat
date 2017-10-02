@@ -113,7 +113,7 @@ composite_name="builder-tiny"
     done
 }
 
-@test "reload a composite using --force, without changing binds, should preserve existing binds, including extra-composite binds" {
+@test "reload a composite using --force, without changing binds or composite ident, should preserve existing binds, including extra-composite binds" {
     background ${hab} run
 
     run ${hab} pkg install core/runit --binlink
@@ -149,7 +149,8 @@ composite_name="builder-tiny"
     # as they would if this were a standalone service we were
     # force-loading without changing any binds.
 
-    run ${hab} svc load --channel=unstable --force core/builder-api-only
+    # Using the exact ident, since we installed from a hart :/
+    run ${hab} svc load --channel=unstable --force core/builder-api-only/1.0.0/20171001023721
     assert_success
 
     assert_spec_value builder-api channel "unstable"
@@ -158,60 +159,75 @@ composite_name="builder-tiny"
     assert_spec_value builder-api-proxy binds '["http:builder-api.default"]'
 }
 
-# @test "reload a composite using --force, changing the ident" {
+@test "reload a composite using --force, changing the ident" {
 
-#     # v1 contains the router, api, and api-proxy services
-#     # v2 contains the router, admin, and admin-proxy services
-#     #
-#     # Thus, doing a force-load from v1 to v2 should remove api and
-#     # api-proxy services, while adding admin and admin-proxy services.
-#     v1_hart="fixtures/core-builder-tiny-1.0.0-20171001014549-x86_64-linux.hart"
-#     v1_ident="core/builder-tiny/1.0.0/20171001014549"
-#     v2_hart="fixtures/core-builder-tiny-2.0.0-20171001014611-x86_64-linux.hart"
-#     v2_ident="core/builder-tiny/2.0.0/20171001014611"
+    # v1 contains the router, api, and api-proxy services
+    # v2 contains the router, admin, and admin-proxy services
+    #
+    # Thus, doing a force-load from v1 to v2 should remove api and
+    # api-proxy services, while adding admin and admin-proxy services.
+    v1_hart="fixtures/core-builder-tiny-1.0.0-20171001014549-x86_64-linux.hart"
+    v1_ident="core/builder-tiny/1.0.0/20171001014549"
+    v2_hart="fixtures/core-builder-tiny-2.0.0-20171001014611-x86_64-linux.hart"
+    v2_ident="core/builder-tiny/2.0.0/20171001014611"
 
-#     run ${hab} svc load --channel=unstable "${v1_hart}"
-#     assert_success
+    run ${hab} svc load --channel=unstable "${v1_hart}"
+    assert_success
 
-#     assert_composite_and_services_are_installed "${v1_ident}"
-#     assert_composite_spec "${v1_ident}"
+    assert_composite_and_services_are_installed "${v1_ident}"
+    assert_composite_spec "${v1_ident}"
 
-#     for service in $(services_for_composite "${v1_ident}"); do
-#         service_name=$(name_from_ident "${service}")
-#         assert_spec_exists_for "${service_name}"
+    assert_spec_exists_for "builder-api"
+    assert_spec_exists_for "builder-api-proxy"
+    assert_spec_exists_for "builder-router"
+    assert_spec_not_exists_for "builder-admin"
+    assert_spec_not_exists_for "builder-admin-proxy"
 
-#         assert_spec_value "${service_name}" ident "${service}"
-#         assert_spec_value "${service_name}" group default
-#         assert_spec_value "${service_name}" composite "${composite_name}"
-#         assert_spec_value "${service_name}" start_style persistent
-#         assert_spec_value "${service_name}" channel unstable
-#         assert_spec_value "${service_name}" topology standalone
-#         assert_spec_value "${service_name}" update_strategy none
-#         assert_spec_value "${service_name}" desired_state up
-#         assert_spec_value "${service_name}" bldr_url "https://bldr.habitat.sh"
-#     done
+    for service in $(services_for_composite "${v1_ident}"); do
+        service_name=$(name_from_ident "${service}")
+        assert_spec_exists_for "${service_name}"
 
-#     # Note that we're reloading *by ident* a composite we loaded from
-#     # a .hart and it's working; we shouldn't need to go out to Builder
-#     # just to change specs.
-#     run ${hab} svc load --force --group=zzzz "${v2_hart}"
+        assert_spec_value "${service_name}" ident "${service}"
+        assert_spec_value "${service_name}" group default
+        assert_spec_value "${service_name}" composite "${composite_name}"
+        assert_spec_value "${service_name}" start_style persistent
+        assert_spec_value "${service_name}" channel unstable
+        assert_spec_value "${service_name}" topology standalone
+        assert_spec_value "${service_name}" update_strategy none
+        assert_spec_value "${service_name}" desired_state up
+        assert_spec_value "${service_name}" bldr_url "https://bldr.habitat.sh"
+    done
 
-#     assert_composite_spec "${v2_ident}" # <-- should be same
-#     for service in $(services_for_composite "${composite_ident}"); do
-#         service_name=$(name_from_ident "${service}")
-#         assert_spec_exists_for "${service_name}"
+    # Note that we're reloading *by ident* a composite we loaded from
+    # a .hart and it's working; we shouldn't need to go out to Builder
+    # just to change specs.
+    run ${hab} svc load --force --group=zzzz "${v2_hart}"
+    assert_success
 
-#         assert_spec_value "${service_name}" ident "${service}"
-#         assert_spec_value "${service_name}" group zzzz # <-- all should have switched
-#         assert_spec_value "${service_name}" composite "${composite_name}"
-#         assert_spec_value "${service_name}" start_style persistent
-#         assert_spec_value "${service_name}" channel unstable
-#         assert_spec_value "${service_name}" topology standalone
-#         assert_spec_value "${service_name}" update_strategy none
-#         assert_spec_value "${service_name}" desired_state up
-#         assert_spec_value "${service_name}" bldr_url "https://bldr.habitat.sh"
-#     done
-# }
+    assert_composite_spec "${v2_ident}"
+    for service in $(services_for_composite "${composite_ident}"); do
+        service_name=$(name_from_ident "${service}")
+        assert_spec_exists_for "${service_name}"
+
+        assert_spec_value "${service_name}" ident "${service}"
+        assert_spec_value "${service_name}" group zzzz # <-- all should have switched
+        assert_spec_value "${service_name}" composite "${composite_name}"
+        assert_spec_value "${service_name}" start_style persistent
+        assert_spec_value "${service_name}" channel unstable
+        assert_spec_value "${service_name}" topology standalone
+        assert_spec_value "${service_name}" update_strategy none
+        assert_spec_value "${service_name}" desired_state up
+        assert_spec_value "${service_name}" bldr_url "https://bldr.habitat.sh"
+    done
+
+    # Assert that the old services have no spec
+    assert_spec_not_exists_for "builder-api"
+    assert_spec_not_exists_for "builder-api-proxy"
+    assert_spec_exists_for "builder-router"
+    assert_spec_exists_for "builder-admin"
+    assert_spec_exists_for "builder-admin-proxy"
+
+}
 
 
 

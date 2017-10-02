@@ -40,13 +40,15 @@ static LOGKEY: &'static str = "CS";
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(default)]
 pub struct CompositeSpec {
-    /// The fully-qualified package identifier for the composite.
-    ///
-    /// (It is not public so we can guarantee that it's
-    /// fully-qualified.)
+    /// The identifier of the composite as given when it was loaded.
     #[serde(deserialize_with = "deserialize_using_from_str",
             serialize_with = "serialize_using_to_string")]
     ident: PackageIdent,
+
+    /// The fully-qualified package identifier for the composite.
+    #[serde(deserialize_with = "deserialize_using_from_str",
+            serialize_with = "serialize_using_to_string")]
+    package_ident: PackageIdent,
 }
 
 // NOTE: Yes, this code is largely copied from ServiceSpec, and should
@@ -57,20 +59,25 @@ pub struct CompositeSpec {
 
 impl CompositeSpec {
     /// Create a CompositeSpec from the installed representation of a
-    /// composite package.
-    // TODO (CM): Once TryFrom is no-longer experimental, I'd like to
-    // implement that instead of this.
-    pub fn from_package_install(package_install: &PackageInstall) -> Result<Self> {
+    /// composite package. Requires the identifier that the composite
+    /// was initially loaded by, as well.
+    pub fn from_package_install(
+        original_ident: &PackageIdent,
+        package_install: &PackageInstall,
+    ) -> Result<Self> {
         match package_install.pkg_type()? {
             PackageType::Composite => {
-                let ident = package_install.ident().clone();
-                if ident.fully_qualified() {
-                    Ok(CompositeSpec { ident: package_install.ident().clone() })
+                let package_ident = package_install.ident().clone();
+                if package_ident.fully_qualified() {
+                    Ok(CompositeSpec {
+                        ident: original_ident.clone(),
+                        package_ident: package_ident,
+                    })
                 } else {
                     // HOW DID THIS EVEN HAPPEN?
                     Err(SupError::from(
                         HCoreError::FullyQualifiedPackageIdentRequired(
-                            ident.to_string(),
+                            package_ident.to_string(),
                         ),
                     ))
                 }
@@ -83,10 +90,17 @@ impl CompositeSpec {
         }
     }
 
-    /// Provide a reference to the identifier of the composite. It is
-    /// guaranteed to be fully-qualified.
+    /// Provide a reference to the identifier of the composite that it
+    /// was loaded as. Analogous to the ident of a standalone
+    /// `ServiceSpec`. It may or may not be fully-qualified.
     pub fn ident(&self) -> &PackageIdent {
         &self.ident
+    }
+
+    /// Provide a reference to the identifier of the composite package
+    /// that was installed. It is guaranteed to be fully-qualified.
+    pub fn package_ident(&self) -> &PackageIdent {
+        &self.package_ident
     }
 
     pub fn file_name(&self) -> String {
@@ -158,11 +172,11 @@ impl FromStr for CompositeSpec {
             sup_error!(Error::ServiceSpecParse(e))
         })?;
 
-        if spec.ident == PackageIdent::default() {
+        if spec.ident == PackageIdent::default() || spec.package_ident == PackageIdent::default() {
             return Err(sup_error!(Error::MissingRequiredIdent));
         }
 
-        if !spec.ident.fully_qualified() {
+        if !spec.package_ident.fully_qualified() {
             return Err(SupError::from(
                 HCoreError::FullyQualifiedPackageIdentRequired(
                     spec.ident().to_string(),

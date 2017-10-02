@@ -558,58 +558,36 @@ fn sub_load(m: &ArgMatches) -> Result<()> {
                     Ok(())
                 }
                 Spec::Composite(composite_spec, mut service_specs) => {
-                    // TODO (CM): For NOW, assume that the ident HAS
-                    // NOT CHANGED
+                    // TODO (CM): need to compare against the id the
+                    // spec was saved with instead
+                    if install_source.as_ref() == composite_spec.ident() {
 
-                    //                    let mut specs = installed_specs_from_ident(&cfg, composite_spec.ident())?;
 
-                    // If the composite spec hasn't changed, we're not
-                    // going to be changing anything about the idents
-                    // of the services. Thus we can just update them
-                    // from the user input.
+                        // TODO (CM): For NOW, assume that the composite
+                        // ident HAS NOT CHANGED
 
-                    // TODO (CM): update_spec_from_input DOES NOT TAKE
-                    // INTO ACCOUNT BINDS
+                        let composite_package =
+                            match util::pkg::installed(composite_spec.ident()) {
+                                Some(package) => package,
+                                // TODO (CM): this should be a proper error
+                                None => unreachable!(), 
+                            };
 
-                    for spec in service_specs.iter_mut() {
-                        update_spec_from_input(spec, m)?;
+                        update_composite_service_specs(&mut service_specs, &composite_package, m)?;
+
+                        for service_spec in service_specs.iter() {
+                            Manager::save_spec_for(&cfg, service_spec)?;
+                            outputln!("The {} service was successfully loaded", service_spec.ident);
+                        }
+                        outputln!(
+                            "The {} composite was successfully loaded",
+                            composite_spec.ident()
+                        );
+                    } else {
+                        // It changed!
+                        // TODO (CM): this!
                     }
-
-                    for spec in service_specs.iter() {
-                        Manager::save_spec_for(&cfg, spec)?;
-                    }
-
-                    outputln!(
-                        "The {} service was successfully loaded",
-                        composite_spec.ident()
-                    );
                     Ok(())
-
-                    // TODO (CM):  handle reload question here
-
-                    // Did the ident change?... Oh, how would we know?
-                    // we don't store the ident in the spec!
-
-                    // Anyway...
-                    // If the spec HAS NOT CHANGED, then we need to
-                    // tweak all the EXISTING specs for the composite.
-                    //
-                    // for each spec
-                    // update the spec based on the user input. if the
-                    // composite didn't change, then these ident's
-                    // won't have either (or have they? What if a user
-                    // individually tweaked them?)
-
-                    //
-                    // If the composite ident HAS changed... (again,
-                    // how would we determine that)
-                    //
-                    // That means that we need to figure out what
-                    // services need to stay, which need to go, and
-                    // which are new. Ugh... let's clean up the rest
-                    // of this before tackling that, eh?
-
-
                 }
             }
         }
@@ -1488,4 +1466,40 @@ fn generate_new_specs_from_package(
         }
     };
     Ok(specs)
+}
+
+fn update_composite_service_specs(
+    spec: &mut Vec<ServiceSpec>,
+    package: &PackageInstall,
+    m: &ArgMatches,
+) -> Result<()> {
+    let bind_map = package.bind_map()?;
+    // TODO (CM): maybe not mutable?
+    let mut cli_composite_binds = composite_binds_from_input(m)?;
+
+    let update_binds = m.values_of("BIND").is_some();
+
+    for spec in spec.iter_mut() {
+        // The Builder URL and channel have default values; we only want to
+        // change them if the user specified something!
+        set_bldr_url_from_input(spec, m);
+        set_channel_from_input(spec, m);
+
+        set_app_env_from_input(spec, m)?;
+        set_group_from_input(spec, m);
+        set_strategy_from_input(spec, m);
+        set_topology_from_input(spec, m);
+
+        // No setting of config or password either; see notes in
+        // `base_composite_service_spec` for more.
+
+        // Just as with standalone services, we don't do anything to
+        // the binds unless you've specified new ones on the CLI. For
+        // composites, such binds can be thought of as binds for the
+        // overall composite.
+        if update_binds {
+            set_composite_binds(spec, &bind_map, &mut cli_composite_binds)?;
+        }
+    }
+    Ok(())
 }

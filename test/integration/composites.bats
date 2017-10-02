@@ -113,6 +113,51 @@ composite_name="builder-tiny"
     done
 }
 
+@test "reload a composite using --force, without changing binds, should preserve existing binds, including extra-composite binds" {
+    background ${hab} run
+
+    run ${hab} pkg install core/runit --binlink
+    assert_success
+
+    # This is the version of router that was current when the test
+    # composite was built.
+    run ${hab} svc load --group=outside core/builder-router/5131/20170923114145
+    assert_success
+
+    wait_for_service_to_run builder-router
+
+    # Now that the router is present, let's load the API-only
+    # composite. Inside the composite, one service will bind to the
+    # other service, but the other service itself needs to bind to the
+    # router, which is outside the composite.
+    run ${hab} svc load --bind=builder-api:router:builder-router.outside fixtures/core-builder-api-only-1.0.0-20171001023721-x86_64-linux.hart
+    assert_success
+
+    wait_for_service_to_run builder-api
+    wait_for_service_to_run builder-api-proxy
+
+    assert_spec_value builder-api channel "stable"
+    assert_spec_value builder-api binds '["router:builder-router.outside"]'
+    assert_spec_value builder-api-proxy channel "stable"
+    assert_spec_value builder-api-proxy binds '["http:builder-api.default"]'
+
+    # OK, here's where the actual test begins (whew!)
+    #
+    # We've got a composite, and it's got extra binds for one of the
+    # services. If we do a force load of the composite to, say, change
+    # the update strategy, then the binds should remain in place (just
+    # as they would if this were a standalone service we were
+    # force-loading without changing any binds.
+
+    run ${hab} svc load --channel=unstable --force core/builder-api-only
+    assert_success
+
+    assert_spec_value builder-api channel "unstable"
+    assert_spec_value builder-api binds '["router:builder-router.outside"]' # <-- if this isn't here, the test failed
+    assert_spec_value builder-api-proxy channel "unstable"
+    assert_spec_value builder-api-proxy binds '["http:builder-api.default"]'
+}
+
 # @test "reload a composite using --force, changing the ident" {
 
 #     # v1 contains the router, api, and api-proxy services

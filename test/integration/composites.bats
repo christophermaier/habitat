@@ -10,15 +10,12 @@ teardown() {
     stop_supervisor
 }
 
-#composite_ident="core/builder-tiny/1.0.0/20170928220329"
-#composite_hart=fixtures/core-builder-tiny-1.0.0-20170928220329-x86_64-linux.hart
+# TODO (CM): Need to come up with a dedicated, stable small composite
+# to test with than part of Builder.
 composite_ident="core/builder-tiny/1.0.0/20170930190003"
 composite_hart=fixtures/core-builder-tiny-1.0.0-20170930190003-x86_64-linux.hart
 composite_short_ident="core/builder-tiny"
 composite_name="builder-tiny"
-
-# TODO: Need to come up with a smaller composite to test with. Some
-# small nginx + app?
 
 @test "install a composite from a hart file" {
     run ${hab} pkg install "${composite_hart}"
@@ -52,10 +49,6 @@ composite_name="builder-tiny"
         assert_spec_value "${service_name}" update_strategy none
         assert_spec_value "${service_name}" desired_state up
         assert_spec_value "${service_name}" bldr_url "https://bldr.habitat.sh"
-
-        # Would be nice to assert on binds, too. Could probably just
-        # assume that if the services are running, they're right,
-        # though.
     done
 }
 
@@ -130,7 +123,9 @@ composite_name="builder-tiny"
     # composite. Inside the composite, one service will bind to the
     # other service, but the other service itself needs to bind to the
     # router, which is outside the composite.
-    run ${hab} svc load --bind=builder-api:router:builder-router.outside fixtures/core-builder-api-only-1.0.0-20171001023721-x86_64-linux.hart
+    run ${hab} svc load \
+        --bind=builder-api:router:builder-router.outside \
+        fixtures/core-builder-api-only-1.0.0-20171001023721-x86_64-linux.hart
     assert_success
 
     wait_for_service_to_run builder-api
@@ -147,9 +142,10 @@ composite_name="builder-tiny"
     # services. If we do a force load of the composite to, say, change
     # the update strategy, then the binds should remain in place (just
     # as they would if this were a standalone service we were
-    # force-loading without changing any binds.
+    # force-loading without changing any binds).
 
-    # Using the exact ident, since we installed from a hart :/
+    # We need to use the the exact ident, since we installed from a
+    # hart :/
     run ${hab} svc load --channel=unstable --force core/builder-api-only/1.0.0/20171001023721
     assert_success
 
@@ -159,8 +155,7 @@ composite_name="builder-tiny"
     assert_spec_value builder-api-proxy binds '["http:builder-api.default"]'
 }
 
-@test "reload a composite using --force, changing the ident" {
-
+@test "reload a composite using --force, changing the ident, can change which services are running" {
     # v1 contains the router, api, and api-proxy services
     # v2 contains the router, admin, and admin-proxy services
     #
@@ -198,9 +193,7 @@ composite_name="builder-tiny"
         assert_spec_value "${service_name}" bldr_url "https://bldr.habitat.sh"
     done
 
-    # Note that we're reloading *by ident* a composite we loaded from
-    # a .hart and it's working; we shouldn't need to go out to Builder
-    # just to change specs.
+    # HERE'S WHERE THE MAGIC HAPPENS
     run ${hab} svc load --force --group=zzzz "${v2_hart}"
     assert_success
 
@@ -220,17 +213,13 @@ composite_name="builder-tiny"
         assert_spec_value "${service_name}" bldr_url "https://bldr.habitat.sh"
     done
 
-    # Assert that the old services have no spec
+    # Assert that the old services have no spec, but the new ones are up!
     assert_spec_not_exists_for "builder-api"
     assert_spec_not_exists_for "builder-api-proxy"
     assert_spec_exists_for "builder-router"
     assert_spec_exists_for "builder-admin"
     assert_spec_exists_for "builder-admin-proxy"
-
 }
-
-
-
 
 @test "unload a composite" {
     # Load a composite and two other standalone services and verify
@@ -264,17 +253,18 @@ composite_name="builder-tiny"
     assert_success
     assert_file_not_exist $(spec_file_for nginx)
 
+    # All the composite services are still there
     assert_composite_spec "${composite_ident}"
     for service in "${all_composite_services[@]}"; do
         service_name=$(name_from_ident "${service}")
         assert_spec_exists_for "${service_name}"
     done
 
+    # Redis, too!
     assert_spec_exists_for redis
 
     # Now, unload the composite
     ########################################################################
-
     run ${hab} svc unload "${composite_short_ident}"
     assert_success
 
@@ -372,11 +362,6 @@ composite_name="builder-tiny"
     assert_composite_spec "${composite_ident}"
 }
 
-
-
-# Don't want to redownload anything
-# TODO (CM): assert that only the right services are running, even
-# after restarts, etc.
 @test "restart a composite" {
     ${hab} pkg install core/runit --binlink
     background ${hab} run
@@ -391,10 +376,9 @@ composite_name="builder-tiny"
     run ${hab} svc stop "${composite_short_ident}"
     assert_success
 
-    # wait for services to stop
-    # TODO (CM): Need a helper for this
-    sleep 5
-
+    wait_for_service_to_die builder-router
+    wait_for_service_to_die builder-api
+    wait_for_service_to_die builder-api-proxy
 
     run ${hab} svc start "${composite_short_ident}"
     assert_success
@@ -404,7 +388,7 @@ composite_name="builder-tiny"
     wait_for_service_to_run builder-api-proxy
 }
 
-@test "binds for just service groups are generated and valid" {
+@test "composite binds for just service groups are generated and valid" {
     run ${hab} pkg install core/runit --binlink
     background ${hab} run
 
@@ -420,7 +404,7 @@ composite_name="builder-tiny"
     assert_spec_value builder-api-proxy binds '["http:builder-api.default"]'
 }
 
-@test "binds for service group + app/env are generated and valid" {
+@test "composite binds for service group + app/env are generated and valid" {
     run ${hab} pkg install core/runit --binlink
     background ${hab} run
 
@@ -453,19 +437,19 @@ composite_name="builder-tiny"
     # composite. Inside the composite, one service will bind to the
     # other service, but the other service itself needs to bind to the
     # router, which is outside the composite.
-    run ${hab} svc load --bind=builder-api:router:builder-router.outside fixtures/core-builder-api-only-1.0.0-20171001023721-x86_64-linux.hart
+    run ${hab} svc load \
+        --bind=builder-api:router:builder-router.outside \
+        fixtures/core-builder-api-only-1.0.0-20171001023721-x86_64-linux.hart
     assert_success
 
     wait_for_service_to_run builder-api
     wait_for_service_to_run builder-api-proxy
-
 
     assert_spec_value builder-api binds '["router:builder-router.outside"]'
     assert_spec_value builder-api-proxy binds '["http:builder-api.default"]'
 }
 
 @test "two-part binds on the CLI are not accepted for composites" {
-
     # This is the version of router that was current when the test
     # composite was built.
     run ${hab} svc load --group=outside core/builder-router/5131/20170923114145
@@ -475,6 +459,7 @@ composite_name="builder-tiny"
         --bind=router:builder-router.outside \
         fixtures/core-builder-api-only-1.0.0-20171001023721-x86_64-linux.hart
     assert_failure
+    # You gotta use 3-part binds for composites!
     assert_line --partial 'Invalid binding "router:builder-router.outside"'
 }
 

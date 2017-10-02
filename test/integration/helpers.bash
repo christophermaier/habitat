@@ -293,11 +293,25 @@ service_is_alive() {
     ps -p "${pid}" > /dev/null 2>&1
 }
 
+service_is_not_alive() {
+    local service_name="${1}"
+    local pid=$(pid_of_service "${service_name}")
+    ps -p "${pid}" > /dev/null 2>&1
+    [ $? -ne 0 ]
+}
+
 # Checks once a second to see if the Habitat-supervised service
 # has is running yet.
 wait_for_service_to_run() {
     local service_name=${1}
     retry 30 1 service_is_alive "${service_name}"
+}
+
+# Checks once a second to see if the Habitat-supervised service
+# has is died yet.
+wait_for_service_to_die() {
+    local service_name=${1}
+    retry 30 1 service_is_not_alive "${service_name}"
 }
 
 pid_has_changed() {

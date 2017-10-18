@@ -415,6 +415,11 @@ declare -A pkg_binds_optional
 pkg_svc_user=hab
 # The group to run the service as
 pkg_svc_group=$pkg_svc_user
+# The default shutdown signal to send a service
+pkg_svc_shutdown_signal="TERM"
+# The default shutdown timeout for a service; if it takes longer than
+# this (in milliseconds) to shutdown, the service is sent the KILL signal
+pkg_svc_shutdown_timeout_ms=8000
 
 # The environment variables inside a package
 declare -A pkg_env
@@ -1327,6 +1332,32 @@ _port_is_valid() {
     return 0
 }
 
+_validate_svc_shutdown_signal() {
+    local signal="${1}"
+    # TODO (CM): use `/bin/kill --list` to get a list of valid
+    # signals; if the value isn't one of these, we've got a problem.
+    #
+    # Also useful: busybox kill -l | busybox awk '{$2}'
+    #
+    # However, the kill that's currently in a studio doesn't nicely
+    # list out the signals, so that might require some additional
+    # work. It might (?) also depend on how we call kill from the
+    # launcher. Punt for now!
+    return 0
+}
+
+_validate_svc_shutdown_timeout_ms() {
+    local timeout="${1}"
+    # TODO (CM): maybe warn on really small timeouts?
+    if [[ "infinity" == "${timeout}" ||
+              ( $(_to_int "${timeout}" 2>/dev/null) &&
+                    $(_to_int "${timeout}" 2>/dev/null) -gt 0 ) ]]; then
+        return 0
+    else
+        return 1
+    fi
+}
+
 # ## Build Phases
 #
 # Stub build phases, in the order they are executed. These can be overridden by
@@ -1899,12 +1930,14 @@ _build_metadata() {
   _render_metadata_TYPE
   _render_metadata_IDENT
 
-  # Only generate `SVC_USER` & `SVC_GROUP` files if this package is a service.
-  # We determine this by checking if there is a `hooks/run` script and/or
+  # Only generate `SVC_*` files if this package is a service.  We
+  # determine this by checking if there is a `hooks/run` script and/or
   # a set `$pkg_svc_run` value.
   if [[ -f "$PLAN_CONTEXT/hooks/run" || -n "${pkg_svc_run:-}" ]]; then
     _render_metadata_SVC_USER
     _render_metadata_SVC_GROUP
+    _render_metadata_SVC_SHUTDOWN_SIGNAL
+    _render_metadata_SVC_SHUTDOWN_TIMEOUT
   fi
 
   return 0

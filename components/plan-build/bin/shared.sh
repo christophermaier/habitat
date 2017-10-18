@@ -190,6 +190,24 @@ _render_metadata_SVC_USER() {
   echo "$pkg_svc_user" > $pkg_prefix/SVC_USER
 }
 
+_render_metadata_SVC_SHUTDOWN_SIGNAL() {
+  debug "Rendering SVC_SHUTDOWN_SIGNAL metadata file"
+  if _validate_svc_shutdown_signal "${pkg_svc_shutdown_signal}" ; then
+      echo "$pkg_svc_shutdown_signal" > $pkg_prefix/SVC_SHUTDOWN_SIGNAL
+  else
+      exit_with "Invalid shutdown signal given: ${pkg_svc_shutdown_signal}"
+  fi
+}
+
+_render_metadata_SVC_SHUTDOWN_TIMEOUT() {
+    debug "Rendering SVC_SHUTDOWN_TIMEOUT metadata file"
+    if _validate_svc_shutdown_timeout_ms "${pkg_svc_shutdown_timeout_ms}" ; then
+        echo "$pkg_svc_shutdown_timeout_ms" > $pkg_prefix/SVC_SHUTDOWN_TIMEOUT
+    else
+        exit_with "Invalid shutdown timeout given (must be either the string literal 'infinity' or a positive integer): '${pkg_svc_shutdown_timeout_ms}'"
+    fi
+}
+
 _render_metadata_TARGET() {
   debug "Rendering TARGET metadata file"
   echo "$pkg_target" > $pkg_prefix/TARGET

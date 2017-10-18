@@ -175,6 +175,8 @@ pub enum MetaFile {
     ResolvedServices, // Composite-only
     Services, // Composite-only
     SvcGroup,
+    SvcShutdownSignal,
+    SvcShutdownTimeout,
     SvcUser,
     Target,
     TDeps,
@@ -202,6 +204,8 @@ impl fmt::Display for MetaFile {
             MetaFile::ResolvedServices => "RESOLVED_SERVICES",
             MetaFile::Services => "SERVICES",
             MetaFile::SvcGroup => "SVC_GROUP",
+            MetaFile::SvcShutdownSignal => "SVC_SHUTDOWN_SIGNAL",
+            MetaFile::SvcShutdownTimeout => "SVC_SHUTDOWN_TIMEOUT",
             MetaFile::SvcUser => "SVC_USER",
             MetaFile::Target => "TARGET",
             MetaFile::TDeps => "TDEPS",
@@ -235,6 +239,27 @@ impl FromStr for PackageType {
             "composite" => Ok(PackageType::Composite),
             _ => Err(Error::InvalidPackageType(value.to_string())),
         }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub enum SvcShutdownTimeout {
+    /// The number of milliseconds the Supervisor will wait before
+    /// sending a KILL signal to a service after its initial
+    /// attempt to shut the service down.
+    Timeout(i32),
+    /// A timeout of "infinity"; the Supervisor will never send
+    /// the service a KILL signal after its initial attempt to
+    /// shut the service down.
+    Infinity,
+}
+
+impl Default for SvcShutdownTimeout {
+    /// The default shutdown timeout of a service is 8000 ms (which
+    /// was the value before such timeouts could be configured for a
+    /// service).
+    fn default() -> Self {
+        SvcShutdownTimeout::Timeout(8000)
     }
 }
 

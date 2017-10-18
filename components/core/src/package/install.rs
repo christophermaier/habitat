@@ -27,7 +27,8 @@ use toml;
 use toml::Value;
 
 use super::{Identifiable, PackageIdent, Target, PackageTarget};
-use super::metadata::{Bind, BindMapping, MetaFile, PackageType, PkgEnv, parse_key_value};
+use super::metadata::{Bind, BindMapping, MetaFile, PackageType, PkgEnv, parse_key_value,
+                      SvcShutdownTimeout};
 use error::{Error, Result};
 use fs;
 
@@ -497,22 +498,62 @@ impl PackageInstall {
         &*self.installed_path
     }
 
-    /// Returns the user that the package is specified to run as
-    /// or None if the package doesn't contain a SVC_USER Metafile
-    pub fn svc_user(&self) -> Result<Option<String>> {
-        match self.read_metafile(MetaFile::SvcUser) {
-            Ok(body) => Ok(Some(body)),
-            Err(Error::MetaFileNotFound(MetaFile::SvcUser)) => Ok(None),
-            Err(e) => Err(e),
-        }
-    }
-
     /// Returns the group that the package is specified to run as
     /// or None if the package doesn't contain a SVC_GROUP Metafile
     pub fn svc_group(&self) -> Result<Option<String>> {
         match self.read_metafile(MetaFile::SvcGroup) {
             Ok(body) => Ok(Some(body)),
             Err(Error::MetaFileNotFound(MetaFile::SvcGroup)) => Ok(None),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// The POSIX signal the Supervisor should use to shut down a
+    /// service.
+    ///
+    /// Returns `Ok(None)` if the package is not a service.
+    pub fn svc_shutdown_signal(&self) -> Result<Option<String>> {
+        match self.read_metafile(MetaFile::SvcShutdownSignal) {
+            Ok(body) => Ok(Some(body)), // TODO (CM): validate the VALUE
+            Err(Error::MetaFileNotFound(MetaFile::SvcShutdownSignal)) => {
+                // TODO (CM): Right now, this would return TERM for packages that
+                // aren't actually services.  Fix that.
+                Ok(Some(String::from("TERM")))
+            }
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Return the configured shutdown timeout for a service.
+    pub fn svc_shutdown_timeout(&self) -> Result<Option<SvcShutdownTimeout>> {
+        match self.read_metafile(MetaFile::SvcShutdownTimeout) {
+            Ok(body) => {
+                if body == "infinity" {
+                    Ok(Some(SvcShutdownTimeout::Infinity))
+                } else {
+                    let timeout_ms: i32 = body.parse()?;
+                    if timeout_ms > 0 {
+                        Ok(Some(SvcShutdownTimeout::Timeout(timeout_ms)))
+                    } else {
+                        Err(Error::InvalidServiceShutdownTimeout(body))
+                    }
+                }
+            }
+            Err(Error::MetaFileNotFound(MetaFile::SvcShutdownTimeout)) => {
+                // TODO (CM): Right now, this would return a timeout
+                // for packages that aren't actually services.  Fix that.
+                Ok(Some(SvcShutdownTimeout::default()))
+            }
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Returns the user that the package is specified to run as
+    /// or None if the package doesn't contain a SVC_USER Metafile
+    pub fn svc_user(&self) -> Result<Option<String>> {
+        match self.read_metafile(MetaFile::SvcUser) {
+            Ok(body) => Ok(Some(body)),
+            Err(Error::MetaFileNotFound(MetaFile::SvcUser)) => Ok(None),
             Err(e) => Err(e),
         }
     }

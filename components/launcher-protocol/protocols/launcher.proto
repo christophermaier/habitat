@@ -17,6 +17,8 @@ message Spawn {
   optional string svc_group = 4;
   optional string svc_password = 5;
   map<string, string> env = 6;
+  optional string svc_shutdown_signal = 7;
+  optional int64 svc_shutdown_timeout = 8;
 }
 
 message SpawnOk {

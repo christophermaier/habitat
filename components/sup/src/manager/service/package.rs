@@ -17,6 +17,7 @@ use std::env;
 use std::ops::{Deref, DerefMut};
 use std::path::{Path, PathBuf};
 
+use hcore::package::metadata::SvcShutdownTimeout;
 use hcore::fs::FS_ROOT_PATH;
 use hcore::package::{PackageIdent, PackageInstall};
 use hcore::util::{deserialize_using_from_str, serialize_using_to_string};
@@ -100,6 +101,8 @@ pub struct Pkg {
     pub svc_pid_file: PathBuf,
     pub svc_run: PathBuf,
     pub svc_user: String,
+    pub svc_shutdown_signal: String,
+    pub svc_shutdown_timeout: SvcShutdownTimeout,
     pub svc_group: String,
 }
 
@@ -116,6 +119,9 @@ impl Pkg {
             svc_var_path: fs::svc_var_path(&package.ident.name),
             svc_pid_file: fs::svc_pid_file(&package.ident.name),
             svc_user: svc_user,
+            // TODO (CM): Remove these unwrap calls... eww
+            svc_shutdown_signal: package.svc_shutdown_signal()?.unwrap(),
+            svc_shutdown_timeout: package.svc_shutdown_timeout()?.unwrap(),
             svc_group: svc_group,
             env: Env::new(&package)?,
             deps: package.tdeps().map_err(|e| {

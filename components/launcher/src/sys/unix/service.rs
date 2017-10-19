@@ -30,13 +30,17 @@ use service::Service;
 pub struct Process {
     pid: pid_t,
     status: Option<ExitStatus>,
+    shutdown_signal: String,
+    shutdown_timeout: Option<i64>,
 }
 
 impl Process {
-    fn new(pid: u32) -> Self {
+    fn new(pid: u32, shutdown_signal: String, shutdown_timeout: Option<i64>) -> Self {
         Process {
             pid: pid as pid_t,
             status: None,
+            shutdown_signal: shutdown_signal,
+            shutdown_timeout: shutdown_timeout,
         }
     }
 
@@ -63,24 +67,44 @@ impl Process {
             pid_to_kill = self.pid.neg();
         }
 
+        // The FromStr implementation for Signal doesn't actually
+        // throw an error, so the unwrap() call is safe.
+        let shutdown_signal: Signal = self.shutdown_signal.parse().unwrap();
+
         // JW TODO: Determine if the error represents a case where the process was already
         // exited before we return out and assume so.
-        if signal(pid_to_kill, Signal::TERM).is_err() {
+        if signal(pid_to_kill, shutdown_signal).is_err() {
             return ShutdownMethod::AlreadyExited;
         }
-        let stop_time = SteadyTime::now() + Duration::seconds(8);
-        loop {
-            if let Ok(Some(_status)) = self.try_wait() {
-                return ShutdownMethod::GracefulTermination;
+
+        if let Some(timeout) = self.shutdown_timeout {
+
+            // TODO (CM): Find a better way to do this... ideally, we
+            // want some kind of sleep until we get a signal that the
+            // process has shut down.
+            //
+            // In the meantime, we can write tests for what we have here.
+
+            let stop_time = SteadyTime::now() + Duration::milliseconds(timeout);
+
+            loop {
+                if let Ok(Some(_status)) = self.try_wait() {
+                    return ShutdownMethod::GracefulTermination;
+                }
+                if SteadyTime::now() < stop_time {
+                    continue;
+                }
+                // JW TODO: Determine if the error represents a case where the process was already
+                // exited before we return out and assume so.
+                if signal(pid_to_kill, Signal::KILL).is_err() {
+                    return ShutdownMethod::GracefulTermination;
+                }
+                return ShutdownMethod::Killed;
             }
-            if SteadyTime::now() < stop_time {
-                continue;
-            }
-            // JW TODO: Determine if the error represents a case where the process was already
-            // exited before we return out and assume so.
-            if signal(pid_to_kill, Signal::KILL).is_err() {
-                return ShutdownMethod::GracefulTermination;
-            }
+        } else {
+            // None case == infinite timeout!
+            // TODO (CM): this is WRONG WRONG WRONG; just doing it so
+            // the code will compile at the moment
             return ShutdownMethod::Killed;
         }
     }
@@ -134,7 +158,20 @@ pub fn run(msg: protocol::Spawn) -> Result<Service> {
         cmd.env(key, val);
     }
     let child = cmd.spawn().map_err(Error::Spawn)?;
-    let process = Process::new(child.id());
+
+    let timeout = if msg.has_svc_shutdown_timeout() {
+        Some(msg.get_svc_shutdown_timeout())
+    } else {
+        None
+    };
+
+    let process = Process::new(
+        child.id(),
+        msg.get_svc_shutdown_signal().to_string(), // TODO (CM):
+        // doesn't really need to be a string... mabye just convert to
+        // a signal here
+        timeout,
+    );
     Ok(Service::new(msg, process, child.stdout, child.stderr))
 }
 

@@ -115,13 +115,15 @@ impl LauncherCli {
     }
 
     /// Send a process spawn command to the connected Launcher
-    pub fn spawn<I, B, U, G, P>(
+    pub fn spawn<I, B, U, G, P, S>(
         &self,
         id: I,
         bin: B,
         user: U,
         group: G,
         password: Option<P>,
+        signal: S,
+        timeout: Option<i32>, // TODO (CM): does this need to be an i64?
         env: Env,
     ) -> Result<Pid>
     where
@@ -130,11 +132,16 @@ impl LauncherCli {
         U: ToString,
         G: ToString,
         P: ToString,
+        S: ToString,
     {
         let mut msg = protocol::Spawn::new();
         msg.set_binary(bin.as_ref().to_path_buf().to_string_lossy().into_owned());
         msg.set_svc_user(user.to_string());
         msg.set_svc_group(group.to_string());
+        msg.set_svc_shutdown_signal(signal.to_string());
+        if let Some(timeout) = timeout {
+            msg.set_svc_shutdown_timeout(timeout);
+        }
         if let Some(password) = password {
             msg.set_svc_password(password.to_string());
         }

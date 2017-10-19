@@ -112,11 +112,19 @@ impl Supervisor {
     {
         outputln!(preamble self.preamble,
             "Starting service as user={}, group={}", &pkg.svc_user, &pkg.svc_group);
+
+        let timeout = match pkg.svc_shutdown_timeout {
+            SvcShutdownTimeout::Infinity => None,
+            SvcShutdownTimeout::Timeout(t) => Some(t)
+        }
+
         let pid = launcher.spawn(
             group.to_string(),
             &pkg.svc_run,
             &pkg.svc_user,
             &pkg.svc_group,
+            &pkg.svc_shutdown_signal,
+            timeout
             svc_password,
             (*pkg.env).clone(),
         )?;

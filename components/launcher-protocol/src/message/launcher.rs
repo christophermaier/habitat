@@ -389,6 +389,8 @@ pub struct Spawn {
     svc_group: ::protobuf::SingularField<::std::string::String>,
     svc_password: ::protobuf::SingularField<::std::string::String>,
     pub env: ::std::collections::HashMap<::std::string::String, ::std::string::String>,
+    svc_shutdown_signal: ::protobuf::SingularField<::std::string::String>,
+    svc_shutdown_timeout: ::std::option::Option<i64>,
     // special fields
     unknown_fields: ::protobuf::UnknownFields,
     cached_size: ::protobuf::CachedSize,
@@ -664,6 +666,77 @@ impl Spawn {
     fn mut_env_for_reflect(&mut self) -> &mut ::std::collections::HashMap<::std::string::String, ::std::string::String> {
         &mut self.env
     }
+
+    // optional string svc_shutdown_signal = 7;
+
+    pub fn clear_svc_shutdown_signal(&mut self) {
+        self.svc_shutdown_signal.clear();
+    }
+
+    pub fn has_svc_shutdown_signal(&self) -> bool {
+        self.svc_shutdown_signal.is_some()
+    }
+
+    // Param is passed by value, moved
+    pub fn set_svc_shutdown_signal(&mut self, v: ::std::string::String) {
+        self.svc_shutdown_signal = ::protobuf::SingularField::some(v);
+    }
+
+    // Mutable pointer to the field.
+    // If field is not initialized, it is initialized with default value first.
+    pub fn mut_svc_shutdown_signal(&mut self) -> &mut ::std::string::String {
+        if self.svc_shutdown_signal.is_none() {
+            self.svc_shutdown_signal.set_default();
+        }
+        self.svc_shutdown_signal.as_mut().unwrap()
+    }
+
+    // Take field
+    pub fn take_svc_shutdown_signal(&mut self) -> ::std::string::String {
+        self.svc_shutdown_signal.take().unwrap_or_else(|| ::std::string::String::new())
+    }
+
+    pub fn get_svc_shutdown_signal(&self) -> &str {
+        match self.svc_shutdown_signal.as_ref() {
+            Some(v) => &v,
+            None => "",
+        }
+    }
+
+    fn get_svc_shutdown_signal_for_reflect(&self) -> &::protobuf::SingularField<::std::string::String> {
+        &self.svc_shutdown_signal
+    }
+
+    fn mut_svc_shutdown_signal_for_reflect(&mut self) -> &mut ::protobuf::SingularField<::std::string::String> {
+        &mut self.svc_shutdown_signal
+    }
+
+    // optional int64 svc_shutdown_timeout = 8;
+
+    pub fn clear_svc_shutdown_timeout(&mut self) {
+        self.svc_shutdown_timeout = ::std::option::Option::None;
+    }
+
+    pub fn has_svc_shutdown_timeout(&self) -> bool {
+        self.svc_shutdown_timeout.is_some()
+    }
+
+    // Param is passed by value, moved
+    pub fn set_svc_shutdown_timeout(&mut self, v: i64) {
+        self.svc_shutdown_timeout = ::std::option::Option::Some(v);
+    }
+
+    pub fn get_svc_shutdown_timeout(&self) -> i64 {
+        self.svc_shutdown_timeout.unwrap_or(0)
+    }
+
+    fn get_svc_shutdown_timeout_for_reflect(&self) -> &::std::option::Option<i64> {
+        &self.svc_shutdown_timeout
+    }
+
+    fn mut_svc_shutdown_timeout_for_reflect(&mut self) -> &mut ::std::option::Option<i64> {
+        &mut self.svc_shutdown_timeout
+    }
 }
 
 impl ::protobuf::Message for Spawn {
@@ -693,6 +766,16 @@ impl ::protobuf::Message for Spawn {
                 6 => {
                     ::protobuf::rt::read_map_into::<::protobuf::types::ProtobufTypeString, ::protobuf::types::ProtobufTypeString>(wire_type, is, &mut self.env)?;
                 },
+                7 => {
+                    ::protobuf::rt::read_singular_string_into(wire_type, is, &mut self.svc_shutdown_signal)?;
+                },
+                8 => {
+                    if wire_type != ::protobuf::wire_format::WireTypeVarint {
+                        return ::std::result::Result::Err(::protobuf::rt::unexpected_wire_type(wire_type));
+                    }
+                    let tmp = is.read_int64()?;
+                    self.svc_shutdown_timeout = ::std::option::Option::Some(tmp);
+                },
                 _ => {
                     ::protobuf::rt::read_unknown_or_skip_group(field_number, wire_type, is, self.mut_unknown_fields())?;
                 },
@@ -721,6 +804,12 @@ impl ::protobuf::Message for Spawn {
             my_size += ::protobuf::rt::string_size(5, &v);
         }
         my_size += ::protobuf::rt::compute_map_size::<::protobuf::types::ProtobufTypeString, ::protobuf::types::ProtobufTypeString>(6, &self.env);
+        if let Some(ref v) = self.svc_shutdown_signal.as_ref() {
+            my_size += ::protobuf::rt::string_size(7, &v);
+        }
+        if let Some(v) = self.svc_shutdown_timeout {
+            my_size += ::protobuf::rt::value_size(8, v, ::protobuf::wire_format::WireTypeVarint);
+        }
         my_size += ::protobuf::rt::unknown_fields_size(self.get_unknown_fields());
         self.cached_size.set(my_size);
         my_size
@@ -743,6 +832,12 @@ impl ::protobuf::Message for Spawn {
             os.write_string(5, &v)?;
         }
         ::protobuf::rt::write_map_with_cached_sizes::<::protobuf::types::ProtobufTypeString, ::protobuf::types::ProtobufTypeString>(6, &self.env, os)?;
+        if let Some(ref v) = self.svc_shutdown_signal.as_ref() {
+            os.write_string(7, &v)?;
+        }
+        if let Some(v) = self.svc_shutdown_timeout {
+            os.write_int64(8, v)?;
+        }
         os.write_unknown_fields(self.get_unknown_fields())?;
         ::std::result::Result::Ok(())
     }
@@ -817,6 +912,16 @@ impl ::protobuf::MessageStatic for Spawn {
                     Spawn::get_env_for_reflect,
                     Spawn::mut_env_for_reflect,
                 ));
+                fields.push(::protobuf::reflect::accessor::make_singular_field_accessor::<_, ::protobuf::types::ProtobufTypeString>(
+                    "svc_shutdown_signal",
+                    Spawn::get_svc_shutdown_signal_for_reflect,
+                    Spawn::mut_svc_shutdown_signal_for_reflect,
+                ));
+                fields.push(::protobuf::reflect::accessor::make_option_accessor::<_, ::protobuf::types::ProtobufTypeInt64>(
+                    "svc_shutdown_timeout",
+                    Spawn::get_svc_shutdown_timeout_for_reflect,
+                    Spawn::mut_svc_shutdown_timeout_for_reflect,
+                ));
                 ::protobuf::reflect::MessageDescriptor::new::<Spawn>(
                     "Spawn",
                     fields,
@@ -835,6 +940,8 @@ impl ::protobuf::Clear for Spawn {
         self.clear_svc_group();
         self.clear_svc_password();
         self.clear_env();
+        self.clear_svc_shutdown_signal();
+        self.clear_svc_shutdown_timeout();
         self.unknown_fields.clear();
     }
 }
@@ -1472,30 +1579,32 @@ impl ::protobuf::reflect::ProtobufValue for ShutdownMethod {
 static file_descriptor_proto_data: &'static [u8] = b"\
     \n\x18protocols/launcher.proto\x12\x08launcher\"\x1e\n\x08Register\x12\
     \x12\n\x04pipe\x18\x01\x20\x01(\tR\x04pipe\"\x1b\n\x07Restart\x12\x10\n\
-    \x03pid\x18\x01\x20\x01(\x03R\x03pid\"\xee\x01\n\x05Spawn\x12\x0e\n\x02i\
+    \x03pid\x18\x01\x20\x01(\x03R\x03pid\"\xd0\x02\n\x05Spawn\x12\x0e\n\x02i\
     d\x18\x01\x20\x01(\tR\x02id\x12\x16\n\x06binary\x18\x02\x20\x01(\tR\x06b\
     inary\x12\x19\n\x08svc_user\x18\x03\x20\x01(\tR\x07svcUser\x12\x1b\n\tsv\
     c_group\x18\x04\x20\x01(\tR\x08svcGroup\x12!\n\x0csvc_password\x18\x05\
     \x20\x01(\tR\x0bsvcPassword\x12*\n\x03env\x18\x06\x20\x03(\x0b2\x18.laun\
-    cher.Spawn.EnvEntryR\x03env\x1a6\n\x08EnvEntry\x12\x10\n\x03key\x18\x01\
-    \x20\x01(\tR\x03key\x12\x14\n\x05value\x18\x02\x20\x01(\tR\x05value:\x02\
-    8\x01\"\x1b\n\x07SpawnOk\x12\x10\n\x03pid\x18\x01\x20\x01(\x03R\x03pid\"\
-    \x1d\n\tTerminate\x12\x10\n\x03pid\x18\x01\x20\x01(\x03R\x03pid\"m\n\x0b\
-    TerminateOk\x12\x1b\n\texit_code\x18\x01\x20\x01(\x05R\x08exitCode\x12A\
-    \n\x0fshutdown_method\x18\x02\x20\x01(\x0e2\x18.launcher.ShutdownMethodR\
-    \x0eshutdownMethod*H\n\x0eShutdownMethod\x12\x11\n\rAlreadyExited\x10\0\
-    \x12\x17\n\x13GracefulTermination\x10\x01\x12\n\n\x06Killed\x10\x02J\xfc\
-    \x08\n\x06\x12\x04\0\0&\x01\n\x08\n\x01\x0c\x12\x03\0\0\x12\n\x08\n\x01\
-    \x02\x12\x03\x02\x08\x10\n\n\n\x02\x04\0\x12\x04\x04\0\x06\x01\n\n\n\x03\
-    \x04\0\x01\x12\x03\x04\x08\x10\n\x0b\n\x04\x04\0\x02\0\x12\x03\x05\x02\
-    \x1b\n\x0c\n\x05\x04\0\x02\0\x04\x12\x03\x05\x02\n\n\x0c\n\x05\x04\0\x02\
-    \0\x05\x12\x03\x05\x0b\x11\n\x0c\n\x05\x04\0\x02\0\x01\x12\x03\x05\x12\
-    \x16\n\x0c\n\x05\x04\0\x02\0\x03\x12\x03\x05\x19\x1a\n\n\n\x02\x04\x01\
-    \x12\x04\x08\0\n\x01\n\n\n\x03\x04\x01\x01\x12\x03\x08\x08\x0f\n\x0b\n\
-    \x04\x04\x01\x02\0\x12\x03\t\x02\x19\n\x0c\n\x05\x04\x01\x02\0\x04\x12\
+    cher.Spawn.EnvEntryR\x03env\x12.\n\x13svc_shutdown_signal\x18\x07\x20\
+    \x01(\tR\x11svcShutdownSignal\x120\n\x14svc_shutdown_timeout\x18\x08\x20\
+    \x01(\x03R\x12svcShutdownTimeout\x1a6\n\x08EnvEntry\x12\x10\n\x03key\x18\
+    \x01\x20\x01(\tR\x03key\x12\x14\n\x05value\x18\x02\x20\x01(\tR\x05value:\
+    \x028\x01\"\x1b\n\x07SpawnOk\x12\x10\n\x03pid\x18\x01\x20\x01(\x03R\x03p\
+    id\"\x1d\n\tTerminate\x12\x10\n\x03pid\x18\x01\x20\x01(\x03R\x03pid\"m\n\
+    \x0bTerminateOk\x12\x1b\n\texit_code\x18\x01\x20\x01(\x05R\x08exitCode\
+    \x12A\n\x0fshutdown_method\x18\x02\x20\x01(\x0e2\x18.launcher.ShutdownMe\
+    thodR\x0eshutdownMethod*H\n\x0eShutdownMethod\x12\x11\n\rAlreadyExited\
+    \x10\0\x12\x17\n\x13GracefulTermination\x10\x01\x12\n\n\x06Killed\x10\
+    \x02J\x86\n\n\x06\x12\x04\0\0(\x01\n\x08\n\x01\x0c\x12\x03\0\0\x12\n\x08\
+    \n\x01\x02\x12\x03\x02\x08\x10\n\n\n\x02\x04\0\x12\x04\x04\0\x06\x01\n\n\
+    \n\x03\x04\0\x01\x12\x03\x04\x08\x10\n\x0b\n\x04\x04\0\x02\0\x12\x03\x05\
+    \x02\x1b\n\x0c\n\x05\x04\0\x02\0\x04\x12\x03\x05\x02\n\n\x0c\n\x05\x04\0\
+    \x02\0\x05\x12\x03\x05\x0b\x11\n\x0c\n\x05\x04\0\x02\0\x01\x12\x03\x05\
+    \x12\x16\n\x0c\n\x05\x04\0\x02\0\x03\x12\x03\x05\x19\x1a\n\n\n\x02\x04\
+    \x01\x12\x04\x08\0\n\x01\n\n\n\x03\x04\x01\x01\x12\x03\x08\x08\x0f\n\x0b\
+    \n\x04\x04\x01\x02\0\x12\x03\t\x02\x19\n\x0c\n\x05\x04\x01\x02\0\x04\x12\
     \x03\t\x02\n\n\x0c\n\x05\x04\x01\x02\0\x05\x12\x03\t\x0b\x10\n\x0c\n\x05\
     \x04\x01\x02\0\x01\x12\x03\t\x11\x14\n\x0c\n\x05\x04\x01\x02\0\x03\x12\
-    \x03\t\x17\x18\n\n\n\x02\x04\x02\x12\x04\x0c\0\x13\x01\n\n\n\x03\x04\x02\
+    \x03\t\x17\x18\n\n\n\x02\x04\x02\x12\x04\x0c\0\x15\x01\n\n\n\x03\x04\x02\
     \x01\x12\x03\x0c\x08\r\n\x0b\n\x04\x04\x02\x02\0\x12\x03\r\x02\x19\n\x0c\
     \n\x05\x04\x02\x02\0\x04\x12\x03\r\x02\n\n\x0c\n\x05\x04\x02\x02\0\x05\
     \x12\x03\r\x0b\x11\n\x0c\n\x05\x04\x02\x02\0\x01\x12\x03\r\x12\x14\n\x0c\
@@ -1517,31 +1626,37 @@ static file_descriptor_proto_data: &'static [u8] = b"\
     \x02\x05\x12\x03\x12\x02\x1e\n\r\n\x05\x04\x02\x02\x05\x04\x12\x04\x12\
     \x02\x11#\n\x0c\n\x05\x04\x02\x02\x05\x06\x12\x03\x12\x02\x15\n\x0c\n\
     \x05\x04\x02\x02\x05\x01\x12\x03\x12\x16\x19\n\x0c\n\x05\x04\x02\x02\x05\
-    \x03\x12\x03\x12\x1c\x1d\n\n\n\x02\x04\x03\x12\x04\x15\0\x17\x01\n\n\n\
-    \x03\x04\x03\x01\x12\x03\x15\x08\x0f\n\x0b\n\x04\x04\x03\x02\0\x12\x03\
-    \x16\x02\x19\n\x0c\n\x05\x04\x03\x02\0\x04\x12\x03\x16\x02\n\n\x0c\n\x05\
-    \x04\x03\x02\0\x05\x12\x03\x16\x0b\x10\n\x0c\n\x05\x04\x03\x02\0\x01\x12\
-    \x03\x16\x11\x14\n\x0c\n\x05\x04\x03\x02\0\x03\x12\x03\x16\x17\x18\n\n\n\
-    \x02\x04\x04\x12\x04\x19\0\x1b\x01\n\n\n\x03\x04\x04\x01\x12\x03\x19\x08\
-    \x11\n\x0b\n\x04\x04\x04\x02\0\x12\x03\x1a\x02\x19\n\x0c\n\x05\x04\x04\
-    \x02\0\x04\x12\x03\x1a\x02\n\n\x0c\n\x05\x04\x04\x02\0\x05\x12\x03\x1a\
-    \x0b\x10\n\x0c\n\x05\x04\x04\x02\0\x01\x12\x03\x1a\x11\x14\n\x0c\n\x05\
-    \x04\x04\x02\0\x03\x12\x03\x1a\x17\x18\n\n\n\x02\x04\x05\x12\x04\x1d\0\
-    \x20\x01\n\n\n\x03\x04\x05\x01\x12\x03\x1d\x08\x13\n\x0b\n\x04\x04\x05\
-    \x02\0\x12\x03\x1e\x02\x1f\n\x0c\n\x05\x04\x05\x02\0\x04\x12\x03\x1e\x02\
-    \n\n\x0c\n\x05\x04\x05\x02\0\x05\x12\x03\x1e\x0b\x10\n\x0c\n\x05\x04\x05\
-    \x02\0\x01\x12\x03\x1e\x11\x1a\n\x0c\n\x05\x04\x05\x02\0\x03\x12\x03\x1e\
-    \x1d\x1e\n\x0b\n\x04\x04\x05\x02\x01\x12\x03\x1f\x02.\n\x0c\n\x05\x04\
-    \x05\x02\x01\x04\x12\x03\x1f\x02\n\n\x0c\n\x05\x04\x05\x02\x01\x06\x12\
-    \x03\x1f\x0b\x19\n\x0c\n\x05\x04\x05\x02\x01\x01\x12\x03\x1f\x1a)\n\x0c\
-    \n\x05\x04\x05\x02\x01\x03\x12\x03\x1f,-\n\n\n\x02\x05\0\x12\x04\"\0&\
-    \x01\n\n\n\x03\x05\0\x01\x12\x03\"\x05\x13\n\x0b\n\x04\x05\0\x02\0\x12\
-    \x03#\x02\x14\n\x0c\n\x05\x05\0\x02\0\x01\x12\x03#\x02\x0f\n\x0c\n\x05\
-    \x05\0\x02\0\x02\x12\x03#\x12\x13\n\x0b\n\x04\x05\0\x02\x01\x12\x03$\x02\
-    \x1a\n\x0c\n\x05\x05\0\x02\x01\x01\x12\x03$\x02\x15\n\x0c\n\x05\x05\0\
-    \x02\x01\x02\x12\x03$\x18\x19\n\x0b\n\x04\x05\0\x02\x02\x12\x03%\x02\r\n\
-    \x0c\n\x05\x05\0\x02\x02\x01\x12\x03%\x02\x08\n\x0c\n\x05\x05\0\x02\x02\
-    \x02\x12\x03%\x0b\x0c\
+    \x03\x12\x03\x12\x1c\x1d\n\x0b\n\x04\x04\x02\x02\x06\x12\x03\x13\x02*\n\
+    \x0c\n\x05\x04\x02\x02\x06\x04\x12\x03\x13\x02\n\n\x0c\n\x05\x04\x02\x02\
+    \x06\x05\x12\x03\x13\x0b\x11\n\x0c\n\x05\x04\x02\x02\x06\x01\x12\x03\x13\
+    \x12%\n\x0c\n\x05\x04\x02\x02\x06\x03\x12\x03\x13()\n\x0b\n\x04\x04\x02\
+    \x02\x07\x12\x03\x14\x02*\n\x0c\n\x05\x04\x02\x02\x07\x04\x12\x03\x14\
+    \x02\n\n\x0c\n\x05\x04\x02\x02\x07\x05\x12\x03\x14\x0b\x10\n\x0c\n\x05\
+    \x04\x02\x02\x07\x01\x12\x03\x14\x11%\n\x0c\n\x05\x04\x02\x02\x07\x03\
+    \x12\x03\x14()\n\n\n\x02\x04\x03\x12\x04\x17\0\x19\x01\n\n\n\x03\x04\x03\
+    \x01\x12\x03\x17\x08\x0f\n\x0b\n\x04\x04\x03\x02\0\x12\x03\x18\x02\x19\n\
+    \x0c\n\x05\x04\x03\x02\0\x04\x12\x03\x18\x02\n\n\x0c\n\x05\x04\x03\x02\0\
+    \x05\x12\x03\x18\x0b\x10\n\x0c\n\x05\x04\x03\x02\0\x01\x12\x03\x18\x11\
+    \x14\n\x0c\n\x05\x04\x03\x02\0\x03\x12\x03\x18\x17\x18\n\n\n\x02\x04\x04\
+    \x12\x04\x1b\0\x1d\x01\n\n\n\x03\x04\x04\x01\x12\x03\x1b\x08\x11\n\x0b\n\
+    \x04\x04\x04\x02\0\x12\x03\x1c\x02\x19\n\x0c\n\x05\x04\x04\x02\0\x04\x12\
+    \x03\x1c\x02\n\n\x0c\n\x05\x04\x04\x02\0\x05\x12\x03\x1c\x0b\x10\n\x0c\n\
+    \x05\x04\x04\x02\0\x01\x12\x03\x1c\x11\x14\n\x0c\n\x05\x04\x04\x02\0\x03\
+    \x12\x03\x1c\x17\x18\n\n\n\x02\x04\x05\x12\x04\x1f\0\"\x01\n\n\n\x03\x04\
+    \x05\x01\x12\x03\x1f\x08\x13\n\x0b\n\x04\x04\x05\x02\0\x12\x03\x20\x02\
+    \x1f\n\x0c\n\x05\x04\x05\x02\0\x04\x12\x03\x20\x02\n\n\x0c\n\x05\x04\x05\
+    \x02\0\x05\x12\x03\x20\x0b\x10\n\x0c\n\x05\x04\x05\x02\0\x01\x12\x03\x20\
+    \x11\x1a\n\x0c\n\x05\x04\x05\x02\0\x03\x12\x03\x20\x1d\x1e\n\x0b\n\x04\
+    \x04\x05\x02\x01\x12\x03!\x02.\n\x0c\n\x05\x04\x05\x02\x01\x04\x12\x03!\
+    \x02\n\n\x0c\n\x05\x04\x05\x02\x01\x06\x12\x03!\x0b\x19\n\x0c\n\x05\x04\
+    \x05\x02\x01\x01\x12\x03!\x1a)\n\x0c\n\x05\x04\x05\x02\x01\x03\x12\x03!,\
+    -\n\n\n\x02\x05\0\x12\x04$\0(\x01\n\n\n\x03\x05\0\x01\x12\x03$\x05\x13\n\
+    \x0b\n\x04\x05\0\x02\0\x12\x03%\x02\x14\n\x0c\n\x05\x05\0\x02\0\x01\x12\
+    \x03%\x02\x0f\n\x0c\n\x05\x05\0\x02\0\x02\x12\x03%\x12\x13\n\x0b\n\x04\
+    \x05\0\x02\x01\x12\x03&\x02\x1a\n\x0c\n\x05\x05\0\x02\x01\x01\x12\x03&\
+    \x02\x15\n\x0c\n\x05\x05\0\x02\x01\x02\x12\x03&\x18\x19\n\x0b\n\x04\x05\
+    \0\x02\x02\x12\x03'\x02\r\n\x0c\n\x05\x05\0\x02\x02\x01\x12\x03'\x02\x08\
+    \n\x0c\n\x05\x05\0\x02\x02\x02\x12\x03'\x0b\x0c\
 ";
 
 static mut file_descriptor_proto_lazy: ::protobuf::lazy::Lazy<::protobuf::descriptor::FileDescriptorProto> = ::protobuf::lazy::Lazy {

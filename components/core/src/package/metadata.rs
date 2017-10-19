@@ -242,6 +242,7 @@ impl FromStr for PackageType {
     }
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub enum SvcShutdownTimeout {
     /// The number of milliseconds the Supervisor will wait before
     /// sending a KILL signal to a service after its initial

@@ -12,11 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+pub mod lifecycle;
+
+
 use std::fmt;
 use std::io::{self, BufRead, BufReader, Read, Write};
 #[cfg(unix)]
 use std::process::{ChildStderr, ChildStdout, ExitStatus};
 use std::thread;
+
+use time::SteadyTime;
 
 use ansi_term::Colour;
 #[cfg(windows)]
@@ -25,11 +30,22 @@ use core::os::process::Pid;
 use protocol;
 
 pub use sys::service::*;
+
+pub use self::lifecycle::*;
+
 use error::Result;
 
+/// An OS-agnostic abstraction over Habitat services from the
+/// Launcher's perspective
 pub struct Service {
+    /// The arguments used to spawn this service; can be used again to
+    /// respawn the same service
     args: protocol::Spawn,
+
+    /// The running process of this service
     process: Process,
+
+    // TODO (CM): Consider pulling this out
     status: Option<ExitStatus>,
 }
 
@@ -65,13 +81,18 @@ impl Service {
         &self.args
     }
 
+    /// Return the OS-specific process identifier for the service.
     pub fn id(&self) -> Pid {
         self.process.id()
     }
 
+    pub fn shutdown(&mut self) -> StoppingService {}
+
+
+    // TODO (CM): rewrite docs
     /// Attempt to gracefully terminate a proccess and then forcefully kill it after
     /// 8 seconds if it has not terminated.
-    pub fn kill(&mut self) -> protocol::ShutdownMethod {
+    pub fn kill(&mut self) -> StoppingService {
         self.process.kill()
     }
 

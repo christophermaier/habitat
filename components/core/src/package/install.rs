@@ -508,6 +508,10 @@ impl PackageInstall {
         }
     }
 
+    // TODO (CM): Should we just return Result<Thing> for the signal
+    // and timeout? It will only have a meaning for services anyway...
+
+
     /// The POSIX signal the Supervisor should use to shut down a
     /// service.
     ///

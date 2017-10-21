@@ -26,6 +26,7 @@ use time::{Duration, SteadyTime};
 
 use error::{Error, Result};
 use service::Service;
+use service::lifecycle::StoppingService;
 
 pub struct Process {
     pid: pid_t,
@@ -48,66 +49,118 @@ impl Process {
         self.pid
     }
 
+    // TODO (CM): This function is currently a synchronous one,
+    // meaning it won't return until the process has been killed. If
+    // we're going to allow for arbitrary timeouts, though, then we
+    // can't do that anymore. We'll need to enqueue this in some
+    // higher-level data structure and check that.
+    //
+    // Thus, we'll want to return some kind of handle to this process
+    // (the pid, likely), as well as a timing indicator (perhaps the
+    // time beyond which a still-live process should be killed).
+    //
+    // We'll want to have something else looking at this datastructure
+    // each tick through the loop. If the process has already stopped,
+    // yay! If not, and the timer has expired, kill it. In both cases,
+    // remove the data from the cache.
+    //
+    // Also do this for windows code.
+
+    // TODO (CM): rewrite docs
+
+    // TODO (CM): rename 'kill' to 'shutdown'; make 'kill' a targeted function
+
+
     /// Attempt to gracefully terminate a proccess and then forcefully kill it after
     /// 8 seconds if it has not terminated.
-    pub fn kill(&mut self) -> ShutdownMethod {
-        let mut pid_to_kill = self.pid;
-        // check the group of the process being killed
-        // if it is the root process of the process group
-        // we send our signals to the entire process group
-        // to prevent orphaned processes.
-        let pgid = unsafe { libc::getpgid(self.pid) };
-        if self.pid == pgid {
-            debug!(
-                "pid to kill {} is the process group root. Sending signal to process group.",
-                self.pid
-            );
-            // sending a signal to the negative pid sends it to the
-            // entire process group instead just the single pid
-            pid_to_kill = self.pid.neg();
-        }
+    pub fn kill(&mut self) -> StoppingService {
+        let pid_to_kill = self.pid_to_signal();
 
         // The FromStr implementation for Signal doesn't actually
-        // throw an error, so the unwrap() call is safe.
+        // throw an error, so this unwrap() call is safe.
+        //
+        // TODO (CM): We should have parsed this before we got down
+        // this far
         let shutdown_signal: Signal = self.shutdown_signal.parse().unwrap();
 
         // JW TODO: Determine if the error represents a case where the process was already
         // exited before we return out and assume so.
         if signal(pid_to_kill, shutdown_signal).is_err() {
-            return ShutdownMethod::AlreadyExited;
+            // TODO (CM): really not sure about this... just temporary
+            // until we have everything else in place. In reality,
+            // this logic likely moves up into the main loop when
+            // handling this stuff.
+
+            return StoppingService::new(self.pid, Some(SteadyTime::now()));
+            // return ShutdownMethod::AlreadyExited;
         }
 
-        if let Some(timeout) = self.shutdown_timeout {
+        let kill_time = match self.shutdown_timeout {
+            Some(timeout) => Some(SteadyTime::now() + Duration::milliseconds(timeout)),
+            None => None, // == infinity
+        };
 
-            // TODO (CM): Find a better way to do this... ideally, we
-            // want some kind of sleep until we get a signal that the
-            // process has shut down.
-            //
-            // In the meantime, we can write tests for what we have here.
+        StoppingService::new(self.pid, kill_time)
 
-            let stop_time = SteadyTime::now() + Duration::milliseconds(timeout);
+        // if let Some(timeout) = self.shutdown_timeout {
 
-            loop {
-                if let Ok(Some(_status)) = self.try_wait() {
-                    return ShutdownMethod::GracefulTermination;
-                }
-                if SteadyTime::now() < stop_time {
-                    continue;
-                }
-                // JW TODO: Determine if the error represents a case where the process was already
-                // exited before we return out and assume so.
-                if signal(pid_to_kill, Signal::KILL).is_err() {
-                    return ShutdownMethod::GracefulTermination;
-                }
-                return ShutdownMethod::Killed;
-            }
+        //     // TODO (CM): Find a better way to do this... ideally, we
+        //     // want some kind of sleep until we get a signal that the
+        //     // process has shut down.
+        //     //
+        //     // In the meantime, we can write tests for what we have here.
+
+        //     let stop_time = SteadyTime::now() + Duration::milliseconds(timeout);
+
+        //     loop {
+        //         if let Ok(Some(_status)) = self.try_wait() {
+        //             return ShutdownMethod::GracefulTermination;
+        //         }
+        //         if SteadyTime::now() < stop_time {
+        //             continue;
+        //         }
+        //         // JW TODO: Determine if the error represents a case where the process was already
+        //         // exited before we return out and assume so.
+        //         if signal(pid_to_kill, Signal::KILL).is_err() {
+        //             return ShutdownMethod::GracefulTermination;
+        //         }
+        //         return ShutdownMethod::Killed;
+        //     }
+        // } else {
+        //     // None case == infinite timeout!
+        //     // TODO (CM): this is WRONG WRONG WRONG; just doing it so
+        //     // the code will compile at the moment
+        //     return ShutdownMethod::Killed;
+        // }
+    }
+
+    /// When shutting down or killing a process, determine which PID we actually
+    /// need to signal. If our PID is equal to the process group ID,
+    /// then we will use the *negative* of the PID to send the signal
+    /// to the entire group instead. This prevents orphaned processes.
+    fn pid_to_signal(&self) -> Pid {
+        let pgid = unsafe { libc::getpgid(self.pid) };
+        if self.pid == pgid {
+            debug!(
+                "PID to kill {} is the process group root. Sending signal to process group instead",
+                self.pid
+            );
+            self.pid.neg()
         } else {
-            // None case == infinite timeout!
-            // TODO (CM): this is WRONG WRONG WRONG; just doing it so
-            // the code will compile at the moment
-            return ShutdownMethod::Killed;
+            self.pid
         }
     }
+
+    // TODO (CM): rename kill to shutdown
+    /// No, really... KILL
+    // TODO (CM): return value?
+    // TODO (CM): should there be an enum for Stoppingservice and
+    // this? Make the interface uniform? Do we only kill shutting-down services?
+    pub fn kill_kill_kill(&mut self) {
+        signal(self.pid_to_signal(), Signal::KILL);
+    }
+
+    // TODO (CM): Aaaaugh, this is still needed for reap_zombies
 
     pub fn try_wait(&mut self) -> Result<Option<ExitStatus>> {
         if let Some(status) = self.status {

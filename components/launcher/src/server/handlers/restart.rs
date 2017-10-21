@@ -33,9 +33,25 @@ impl Handler for RestartHandler {
                 return Err(reply);
             }
         };
+
+
+        // TODO (CM): we'll want to record the timing information
+        // that this call will return. The trick now is also keeping
+        // track of the fact that this service needs to restart once
+        // it's finally finished shutting down!
+
+
         service.kill();
+
         match service.wait() {
             Ok(_status) => {
+
+                // TODO (CM): Need to make sure that the proper
+                // shutdown values get propagated in here (I think
+                // they do, though)
+                //
+                // This logic might need to get pulled up into the
+                // main loop, though!
                 match service::run(service.take_args()) {
                     Ok(new_service) => {
                         let mut reply = protocol::SpawnOk::new();

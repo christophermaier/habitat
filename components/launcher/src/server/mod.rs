@@ -34,6 +34,11 @@ use {SUP_CMD, SUP_PACKAGE_IDENT};
 use error::{Error, Result};
 use service::Service;
 
+use time::SteadyTime;
+
+// TODO (CM): This struct needs to be generic over Linux and Windows
+use service::StoppingService;
+
 const SUP_CMD_ENVVAR: &'static str = "HAB_SUP_BINARY";
 static LOGKEY: &'static str = "SV";
 
@@ -135,6 +140,10 @@ impl Server {
         self.services.reap_zombies()
     }
 
+    fn handle_stopping_services(&mut self) {
+        self.services.handle_stopping_services()
+    }
+
     fn shutdown(&mut self) {
         debug!("Shutting down...");
         if send(&self.tx, &protocol::Shutdown::new()).is_err() {
@@ -154,6 +163,8 @@ impl Server {
 
     fn tick(&mut self) -> Result<TickState> {
         self.reap_zombies();
+        self.handle_stopping_services();
+
         match signals::check_for_signal() {
             Some(SignalEvent::Shutdown) => {
                 self.shutdown();
@@ -166,37 +177,162 @@ impl Server {
     }
 }
 
+// TODO (CM): maybe wrap a Service with additional "stopping" metadata?
+
 #[derive(Debug, Default)]
-pub struct ServiceTable(HashMap<Pid, Service>);
+struct StoppingServices(HashMap<Pid, StoppingService>);
+
+impl StoppingServices {
+    /// Add a service to track.
+    // TODO (CM): This should be *removed* from the ServiceTable when
+    // it's added to this structure.
+    fn add(&mut self, service: StoppingService) {
+        self.0.insert(service.pid(), service);
+    }
+
+    /// Runs through the services that are queued for stopping and
+    /// returns two Vectors; the first containing services that have
+    /// exceeded their shutdown timeout, and the second containing
+    /// services that have *not* exceeded their timeout, but have
+    /// already stopped.
+    ///
+    /// Note that the services that have exceeded their timeout may or
+    /// may not be running still; we don't check that here.
+    ///
+    /// The intention here is that all the stopped processes will have
+    /// been waited on, and all the "to_kill" processes will need to
+    /// be killed, and then wea
+    fn i_like_my_butt(&mut self) -> (Vec<StoppingService>, Vec<StoppingService>) {
+
+        if self.0.is_empty() {
+            return (vec![], vec![]);
+        }
+
+        let mut to_kill = vec![];
+        let mut stopped = vec![];
+
+        let now = SteadyTime::now();
+
+        for (pid, stopping_service) in self.0.iter_mut() {
+            match stopping_service.kill_time() {
+                Some(kill_time) => {
+                    if kill_time <= now {
+                        to_kill.push(pid.clone());
+                    } else {
+                        // not expired, but might have already exited
+
+                        // TODO (CM): Need to augment StoppingService
+                        // with the status, and set it here
+                        if let Ok(Some(_status)) = stopping_service.try_wait() {
+                            // TODO (CM): status is kept in stopping_service
+                            stopped.push(pid.clone());
+                        }
+                    }
+                }
+                None => {
+                    // "infinite" timeout; has it stopped?
+                    if let Ok(Some(_status)) = stopping_service.try_wait() {
+                        stopped.push(pid.clone());
+                    }
+                }
+            }
+        }
+
+        // TODO (CM): can the unwrap be pulled into the collect, somehow?
+        let to_kill = to_kill
+            .into_iter()
+            .map(|ref pid| self.0.remove(pid).unwrap())
+            .collect();
+
+        let stopped = stopped
+            .into_iter()
+            .map(|ref pid| self.0.remove(pid).unwrap())
+            .collect();
+
+        (to_kill, stopped)
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct ServiceTable {
+    live_services: HashMap<Pid, Service>,
+    shutting_down: StoppingServices,
+}
 
 impl ServiceTable {
+    // TODO (CM): consider renaming the "old" ServiceTable functions
+    // to reflect the larger scope of the service table
+    //
+    // get, get_mut, insert, remove
     pub fn get(&self, pid: Pid) -> Option<&Service> {
-        self.0.get(&pid)
+        self.live_services.get(&pid)
     }
 
     pub fn get_mut(&mut self, pid: Pid) -> Option<&mut Service> {
-        self.0.get_mut(&pid)
+        self.live_services.get_mut(&pid)
     }
 
     pub fn insert(&mut self, service: Service) {
-        self.0.insert(service.id(), service);
+        self.live_services.insert(service.id(), service);
     }
 
     pub fn remove(&mut self, pid: Pid) -> Option<Service> {
-        self.0.remove(&pid)
+        self.live_services.remove(&pid)
     }
 
+
+
+
+
+
+    pub fn register_stopping_service(&mut self, svc: StoppingService) {
+        // TODO (CM): remove from live_services
+        self.shutting_down.add(svc);
+    }
+
+
+    // TODO (CM): Ensure that kill_all goes through the stopping
+    // services and kill them all.
     fn kill_all(&mut self) {
-        for service in self.0.values_mut() {
+        for service in self.live_services.values_mut() {
             outputln!(preamble service.name(), "Stopping...");
-            let shutdown_method = service.kill();
-            outputln!(preamble service.name(), "Shutdown OK: {}", shutdown_method);
+
+            // TODO (CM): Hrmm... this is a synchronous call
+
+            // TODO (CM): we can take the timer that's returned here
+            // and handle things in our service table (thinking that's
+            // where we stick things)
+            let stopping_service = service.kill();
+            // TODO (CM): INSERT THIS INTO A DATA STRUCTURE
+
+            // TODO (CM): need to remove this pid from the ServiceTable
+
+
+            // TODO (CM):  this output will be lifted to the
+            // higher-level thing watching out for dying processes
+
+            // Could try to do something along the lines of reap_zombies
+
+            //outputln!(preamble service.name(), "Shutdown OK: {}", shutdown_method);
+        }
+    }
+
+    // TODO (CM): rename / normalize name
+    fn handle_stopping_services(&mut self) {
+        let (to_kill, stopped) = self.shutting_down.i_like_my_butt();
+
+        for kill_it in to_kill.into_iter() {
+            // kill
+        }
+
+        for stopped_svc in stopped.into_iter() {
+            // message, basically
         }
     }
 
     fn reap_zombies(&mut self) {
         let mut dead: Vec<Pid> = vec![];
-        for service in self.0.values_mut() {
+        for service in self.live_services.values_mut() {
             match service.try_wait() {
                 Ok(None) => (),
                 Ok(Some(code)) => {
@@ -215,7 +351,7 @@ impl ServiceTable {
             }
         }
         for pid in dead {
-            self.0.remove(&pid);
+            self.live_services.remove(&pid);
         }
     }
 }

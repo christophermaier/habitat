@@ -28,11 +28,37 @@ impl Handler for TerminateHandler {
             Some(service) => {
                 debug!("Terminating: {}", service.id());
                 let shutdown_method = service.kill();
+
+                // TODO (CM): OK, if I made it so service.kill
+                // returned some data immediately, I'd still need to
+                // figure out if what to return for a reply
+                // message. Even if I wait around a little bit on the
+                // assumption that a service will generally exit
+                // quick-ish, I still need to handle the extreme case.
+                //
+                // Guess the protocol message will need to be modified
+                // to take that into account!
+
+                // exit code would not be set (so it'd be None)
+                // shutdown_method would be... Pending? Current values
+                // are:
+                //
+                // AlreadyExited
+                // GracefulTermination
+                // Killed
+                //
+                // Who ultimately consumes this value?
+
+                // does service.wait continue to work when we decouple things?
                 match service.wait() {
                     Ok(status) => {
                         let mut reply = protocol::TerminateOk::new();
                         reply.set_exit_code(status.code().unwrap_or(0));
-                        reply.set_shutdown_method(shutdown_method);
+
+                        // TODO (CM): TEMPORARY until we have a new
+                        // response to give.
+
+                        // reply.set_shutdown_method(shutdown_method);
                         Ok(reply)
                     }
                     Err(err) => Err(protocol::error(err)),

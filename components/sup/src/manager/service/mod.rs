@@ -253,6 +253,8 @@ impl Service {
     }
 
     pub fn stop(&mut self, launcher: &LauncherCli) {
+
+        // TODO (CM): reword messaging in case the shutdown is pending
         if let Err(err) = self.supervisor.stop(launcher) {
             outputln!(preamble self.service_group, "Service stop failed: {}", err);
         }
@@ -270,6 +272,8 @@ impl Service {
                 )
                 .err()
             {
+
+                // TODO (CM): reword messaging in case the shutdown is pending
                 outputln!(preamble self.service_group, "Service restart failed: {}", err);
             }
         } else {

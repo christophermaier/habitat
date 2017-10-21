@@ -47,21 +47,7 @@ impl Process {
     /// Attempt to gracefully terminate a proccess and then forcefully kill it after
     /// 8 seconds if it has not terminated.
     pub fn kill(&mut self) -> ShutdownMethod {
-        let mut pid_to_kill = self.pid;
-        // check the group of the process being killed
-        // if it is the root process of the process group
-        // we send our signals to the entire process group
-        // to prevent orphaned processes.
-        let pgid = unsafe { libc::getpgid(self.pid) };
-        if self.pid == pgid {
-            debug!(
-                "pid to kill {} is the process group root. Sending signal to process group.",
-                self.pid
-            );
-            // sending a signal to the negative pid sends it to the
-            // entire process group instead just the single pid
-            pid_to_kill = self.pid.neg();
-        }
+        let pid_to_kill = self.pid_to_signal();
 
         // JW TODO: Determine if the error represents a case where the process was already
         // exited before we return out and assume so.
@@ -111,6 +97,24 @@ impl Process {
                 self.status = Some(ExitStatus::from_raw(status));
                 Ok(ExitStatus::from_raw(status))
             }
+        }
+    }
+
+    /// When shutting down or killing a process, determine which PID
+    /// we actually need to signal. If our PID is equal to the process
+    /// group ID, then we will use the *negative* of the PID to send
+    /// the signal to the entire group instead. This prevents orphaned
+    /// processes.
+    fn pid_to_signal(&self) -> Pid {
+        let pgid = unsafe { libc::getpgid(self.pid) };
+        if self.pid == pgid {
+            debug!(
+                "PID to kill {} is the process group root. Sending signal to process group instead",
+                self.pid
+            );
+            self.pid.neg()
+        } else {
+            self.pid
         }
     }
 }

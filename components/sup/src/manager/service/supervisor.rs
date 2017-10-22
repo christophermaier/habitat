@@ -55,6 +55,12 @@ impl fmt::Display for ProcessState {
     }
 }
 
+impl Default for ProcessState {
+    fn default() -> Self {
+        ProcessState::Down
+    }
+}
+
 #[derive(Debug)]
 pub struct Supervisor {
     pub preamble: String,
@@ -68,7 +74,7 @@ impl Supervisor {
     pub fn new(service_group: &ServiceGroup) -> Supervisor {
         Supervisor {
             preamble: service_group.to_string(),
-            state: ProcessState::Down,
+            state: ProcessState::default(),
             state_entered: time::get_time(),
             pid: None,
             pid_file: fs::svc_pid_file(service_group.service()),

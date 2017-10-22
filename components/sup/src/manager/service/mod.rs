@@ -294,6 +294,8 @@ impl Service {
             }
         }
 
+        self.check_process();
+
         let svc_updated = self.update_templates(census_ring);
         if self.update_service_files(census_ring) {
             self.file_updated();
@@ -643,8 +645,6 @@ impl Service {
     }
 
     fn execute_hooks(&mut self, launcher: &LauncherCli) {
-        self.check_process();
-
         if !self.initialized {
             if self.supervisor.state == ProcessState::Up {
                 outputln!("Reattached to {}", self.service_group);

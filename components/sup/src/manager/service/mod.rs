@@ -294,7 +294,7 @@ impl Service {
             }
         }
 
-        self.check_process();
+        self.resolve_process_state();
 
         let svc_updated = self.update_templates(census_ring);
         if self.update_service_files(census_ring) {
@@ -397,14 +397,9 @@ impl Service {
         ret
     }
 
-    /// Updates the process state of the service's supervisor. Returns
-    /// true if the process is alive; false otherwise.
-    fn check_process(&mut self) -> bool {
+    /// Updates the process state of the service's supervisor.
+    fn resolve_process_state(&mut self)  {
         self.supervisor.resolve_process_state();
-        match self.supervisor.state {
-            ProcessState::Up => true,
-            ProcessState::Down => false
-        }
     }
 
     fn process_down(&self) -> bool {

@@ -75,29 +75,33 @@ impl Supervisor {
         }
     }
 
-    /// Check if the child process is running
-    pub fn check_process(&mut self) -> bool {
-        let pid = match self.pid {
-            Some(pid) => Some(pid),
-            None => {
-                if self.pid_file.exists() {
-                    Some(read_pid(&self.pid_file).unwrap())
-                } else {
-                    None
-                }
-            }
-        };
-        if let Some(pid) = pid {
+    /// Read from a local PID file if present, and not already
+    /// tracking a PID.
+    fn maybe_sync_with_pidfile(&mut self) {
+        self.pid = self.pid.or_else(||
+                                    if self.pid_file.exists() {
+                                        Some(read_pid(&self.pid_file).unwrap())
+                                    } else {
+                                        None
+                                    }
+        )
+    }
+
+    /// If we have a PID and it's alive, then mark our process as up;
+    /// otherwise, it's down.
+    pub fn resolve_process_state(&mut self) {
+        self.maybe_sync_with_pidfile();
+
+        if let Some(pid) = self.pid {
             if process::is_alive(pid) {
                 self.change_state(ProcessState::Up);
                 self.pid = Some(pid);
-                return true;
             }
         }
+
         self.change_state(ProcessState::Down);
         self.cleanup_pidfile();
         self.pid = None;
-        false
     }
 
     pub fn start<T>(

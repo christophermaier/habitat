@@ -98,10 +98,7 @@ impl Supervisor {
                 self.pid = Some(pid);
             }
         }
-
-        self.change_state(ProcessState::Down);
-        self.cleanup_pidfile();
-        self.pid = None;
+        self.mark_process_as_dead();
     }
 
     pub fn start<T>(
@@ -149,9 +146,14 @@ impl Supervisor {
             return Ok(());
         }
         launcher.terminate(self.pid.unwrap())?;
+        self.mark_process_as_dead();
+        Ok(())
+    }
+
+    fn mark_process_as_dead(&mut self) {
         self.cleanup_pidfile();
         self.change_state(ProcessState::Down);
-        Ok(())
+        self.pid = None;
     }
 
     pub fn restart<T>(
@@ -174,8 +176,7 @@ impl Supervisor {
                         Ok(())
                     }
                     Err(err) => {
-                        self.cleanup_pidfile();
-                        self.change_state(ProcessState::Down);
+                        self.mark_process_as_dead();
                         Err(sup_error!(Error::Launcher(err)))
                     }
                 }

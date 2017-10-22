@@ -481,19 +481,21 @@ impl Service {
         rumor
     }
 
-    /// Run initialization hook if present
-    fn initialize(&mut self) {
-        if self.initialized {
-            return;
-        }
-        outputln!(preamble self.service_group, "Initializing");
-        self.initialized = true;
-        if let Some(ref hook) = self.hooks.init {
-            self.initialized = hook.run(
-                &self.service_group,
-                &self.pkg,
-                self.svc_encrypted_password.as_ref(),
-            )
+    /// If the service has not already initialized, run its
+    /// initialization hook (if it has one).
+    fn initialize_if_needed(&mut self) {
+        if !self.initialized {
+            outputln!(preamble self.service_group, "Initializing");
+            self.initialized = match self.hooks.init {
+                Some(ref init_hook) => {
+                    init_hook.run(
+                        &self.service_group,
+                        &self.pkg,
+                        self.svc_encrypted_password.as_ref(),
+                    )
+                },
+                None => true
+            };
         }
     }
 
@@ -642,7 +644,7 @@ impl Service {
                 self.initialized = true;
                 return;
             }
-            self.initialize();
+            self.initialize_if_needed();
             if self.initialized {
                 self.start(launcher);
                 self.post_run();

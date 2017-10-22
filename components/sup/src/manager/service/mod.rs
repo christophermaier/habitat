@@ -643,8 +643,10 @@ impl Service {
     }
 
     fn execute_hooks(&mut self, launcher: &LauncherCli) {
+        self.check_process();
+
         if !self.initialized {
-            if self.check_process() {
+            if self.supervisor.state == ProcessState::Up {
                 outputln!("Reattached to {}", self.service_group);
                 self.initialized = true;
                 return;
@@ -655,7 +657,6 @@ impl Service {
                 self.post_run();
             }
         } else {
-            self.check_process();
             if Instant::now().duration_since(self.last_health_check) >= *HEALTH_CHECK_INTERVAL {
                 self.run_health_check_hook();
             }

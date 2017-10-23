@@ -483,6 +483,65 @@ impl Service {
         rumor
     }
 
+    // Hook Execution
+    ////////////////////////////////////////////////////////////////////////
+
+    fn execute_hooks(&mut self, launcher: &LauncherCli) {
+        if !self.initialized {
+            if self.supervisor.state == ProcessState::Up {
+                outputln!("Reattached to {}", self.service_group);
+                self.initialized = true;
+                return;
+            }
+
+            self.initialize_if_needed();
+
+            if self.initialized {
+                self.start(launcher);
+                self.execute_post_run_hook();
+            }
+
+        } else {
+
+            self.execute_health_check_hook_if_due();
+
+            // NOTE: if you need reconfiguration and you DON'T have a
+            // reload script, you're going to restart anyway.
+            if self.needs_reload || self.process_down() || self.needs_reconfiguration {
+                self.reload(launcher);
+                if self.needs_reconfiguration {
+                    self.execute_reconfigure_hook()
+                }
+            }
+        }
+    }
+
+    fn execute_health_check_hook_if_due(&mut self) {
+        let due = Instant::now().duration_since(self.last_health_check) >= *HEALTH_CHECK_INTERVAL;
+
+        if due {
+            let check_result = match self.hooks.health_check {
+                Some(ref hook) => {
+                    hook.run(
+                        &self.service_group,
+                        &self.pkg,
+                        self.svc_encrypted_password.as_ref(),
+                    )
+                },
+                None => {
+                    // No health-check hook; use process status as a substitute
+                    match self.supervisor.state {
+                        ProcessState::Up => HealthCheck::Ok,
+                        ProcessState::Down => HealthCheck::Critical
+                    }
+                }
+            };
+
+            self.last_health_check = Instant::now();
+            self.cache_health_check(check_result);
+        }
+    }
+
     /// If the service has not already initialized, run its
     /// initialization hook (if it has one).
     fn initialize_if_needed(&mut self) {
@@ -501,10 +560,9 @@ impl Service {
         }
     }
 
-    /// Run reconfigure hook if present. Return false if it is not present, to trigger default
-    /// restart behavior.
-    fn reconfigure(&mut self) {
+    fn execute_reconfigure_hook(&mut self) {
         self.needs_reconfiguration = false;
+
         if let Some(ref hook) = self.hooks.reconfigure {
             hook.run(
                 &self.service_group,
@@ -514,7 +572,7 @@ impl Service {
         }
     }
 
-    fn post_run(&mut self) {
+    fn execute_post_run_hook(&mut self) {
         if let Some(ref hook) = self.hooks.post_run {
             hook.run(
                 &self.service_group,
@@ -537,6 +595,10 @@ impl Service {
         })
     }
 
+    // END HOOK EXECUTION
+    ////////////////////////////////////////////////////////////////////////
+
+    
     /// this function wraps create_dir_all so we can give friendly error
     /// messages to the user.
     fn create_dir_all<P: AsRef<Path>>(path: P) -> Result<()> {
@@ -639,34 +701,6 @@ impl Service {
         Ok(())
     }
 
-    fn execute_hooks(&mut self, launcher: &LauncherCli) {
-        if !self.initialized {
-            if self.supervisor.state == ProcessState::Up {
-                outputln!("Reattached to {}", self.service_group);
-                self.initialized = true;
-                return;
-            }
-            self.initialize_if_needed();
-            if self.initialized {
-                self.start(launcher);
-                self.post_run();
-            }
-        } else {
-            if Instant::now().duration_since(self.last_health_check) >= *HEALTH_CHECK_INTERVAL {
-                self.run_health_check_hook();
-            }
-
-            // NOTE: if you need reconfiguration and you DON'T have a
-            // reload script, you're going to restart anyway.
-            if self.needs_reload || self.process_down() || self.needs_reconfiguration {
-                self.reload(launcher);
-                if self.needs_reconfiguration {
-                    self.reconfigure()
-                }
-            }
-        }
-    }
-
     /// Run file_updated hook if present
     fn file_updated(&self) -> bool {
         if self.initialized {
@@ -725,23 +759,6 @@ impl Service {
             census,
             self.binds.iter(),
         )
-    }
-
-    fn run_health_check_hook(&mut self) {
-        let check_result = if let Some(ref hook) = self.hooks.health_check {
-            hook.run(
-                &self.service_group,
-                &self.pkg,
-                self.svc_encrypted_password.as_ref(),
-            )
-        } else {
-            match self.supervisor.status() {
-                (true, _) => HealthCheck::Ok,
-                (false, _) => HealthCheck::Critical,
-            }
-        };
-        self.last_health_check = Instant::now();
-        self.cache_health_check(check_result);
     }
 
     fn cache_service_file(&mut self, service_file: &ServiceFile) -> bool {

@@ -133,20 +133,6 @@ impl Supervisor {
         Ok(())
     }
 
-    pub fn status(&self) -> (bool, String) {
-        let status = format!(
-            "{}: {} for {}",
-            self.preamble,
-            self.state,
-            time::get_time() - self.state_entered
-        );
-        let healthy = match self.state {
-            ProcessState::Up => true,
-            ProcessState::Down => false,
-        };
-        (healthy, status)
-    }
-
     pub fn stop(&mut self, launcher: &LauncherCli) -> Result<()> {
         if self.pid.is_none() {
             return Ok(());

@@ -17,7 +17,7 @@ use protocol;
 
 use super::{Handler, HandleResult};
 use server::ServiceTable;
-use service;
+use service::{self, ServiceStatus};
 
 pub struct RestartHandler;
 impl Handler for RestartHandler {
@@ -25,28 +25,57 @@ impl Handler for RestartHandler {
     type Reply = protocol::SpawnOk;
 
     fn handle(msg: Self::Message, services: &mut ServiceTable) -> HandleResult<Self::Reply> {
-        let mut service = match services.remove(msg.get_pid() as Pid) {
-            Some(service) => service,
+
+        match services.get_mut(msg.get_pid() as Pid) {
+            Some(service) => {
+                service.kill();
+                service.set_current_status(ServiceStatus::Restarting);
+
+
+
+                // TODO (CM): NOOOOOO this needs to be a real protocol reply
+                let reply = protocol::SpawnOk::new();
+                // reply.set_exit_code(status.code().unwrap_or(0));
+                // reply.set_shutdown_method(shutdown_method);
+                Ok(reply)
+            }
             None => {
                 let mut reply = protocol::NetErr::new();
                 reply.set_code(protocol::ErrCode::NoPID);
                 return Err(reply);
             }
-        };
-        service.kill();
-        match service.wait() {
-            Ok(_status) => {
-                match service::run(service.take_args()) {
-                    Ok(new_service) => {
-                        let mut reply = protocol::SpawnOk::new();
-                        reply.set_pid(new_service.id().into());
-                        services.insert(new_service);
-                        Ok(reply)
-                    }
-                    Err(err) => Err(protocol::error(err)),
-                }
-            }
-            Err(err) => Err(protocol::error(err)),
+
         }
+
+
+
+
+
+
+
+
+        // let mut service = match services.remove(msg.get_pid() as Pid) {
+        //     Some(service) => service,
+        //     None => {
+        //         let mut reply = protocol::NetErr::new();
+        //         reply.set_code(protocol::ErrCode::NoPID);
+        //         return Err(reply);
+        //     }
+        // };
+        // service.kill();
+        // match service.wait() {
+        //     Ok(_status) => {
+        //         match service::run(service.take_args()) {
+        //             Ok(new_service) => {
+        //                 let mut reply = protocol::SpawnOk::new();
+        //                 reply.set_pid(new_service.id().into());
+        //                 services.insert(new_service);
+        //                 Ok(reply)
+        //             }
+        //             Err(err) => Err(protocol::error(err)),
+        //         }
+        //     }
+        //     Err(err) => Err(protocol::error(err)),
+        // }
     }
 }

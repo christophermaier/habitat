@@ -145,11 +145,14 @@ impl LauncherCli {
         Ok(reply.get_pid() as Pid)
     }
 
+
     pub fn terminate(&self, pid: Pid) -> Result<i32> {
         let mut msg = protocol::Terminate::new();
         msg.set_pid(pid.into());
         Self::send(&self.tx, &msg)?;
         let reply = Self::recv::<protocol::TerminateOk>(&self.rx)?;
+        // TODO (CM): We only use the exit code of TerminateOk
+        // TODO (CM): And even *that* doesn't get used elsewhere
         Ok(reply.get_exit_code())
     }
 }

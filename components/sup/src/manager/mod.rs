@@ -208,6 +208,10 @@ impl Manager {
         serde_json::from_reader(&dat).map_err(|e| sup_error!(Error::ServiceDeserializationError(e)))
     }
 
+    /// Shut down the entire Supervisor itself. This shuts down all
+    /// services running under it.
+    // TODO (CM): Ensure that the launcher sends the appropriate
+    // shutdown signals here
     pub fn term(cfg: &ManagerConfig) -> Result<()> {
         let state_path = Self::state_path_from(&cfg);
         let fs_cfg = FsCfg::new(state_path);

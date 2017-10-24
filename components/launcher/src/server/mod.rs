@@ -19,7 +19,7 @@ use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::str::FromStr;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, SteadyTime};
 
 use core;
 use core::package::{PackageIdent, PackageInstall};
@@ -29,10 +29,12 @@ use ipc_channel::ipc::{IpcOneShotServer, IpcReceiver, IpcSender};
 use protobuf;
 use protocol::{self, ERR_NO_RETRY_EXCODE, OK_NO_RETRY_EXCODE};
 
+
+
 use self::handlers::Handler;
 use {SUP_CMD, SUP_PACKAGE_IDENT};
 use error::{Error, Result};
-use service::Service;
+use service::{Service, ServiceStatus};
 
 const SUP_CMD_ENVVAR: &'static str = "HAB_SUP_BINARY";
 static LOGKEY: &'static str = "SV";
@@ -153,7 +155,9 @@ impl Server {
     }
 
     fn tick(&mut self) -> Result<TickState> {
+
         self.reap_zombies();
+
         match signals::check_for_signal() {
             Some(SignalEvent::Shutdown) => {
                 self.shutdown();
@@ -190,13 +194,97 @@ impl ServiceTable {
         for service in self.0.values_mut() {
             outputln!(preamble service.name(), "Stopping...");
             let shutdown_method = service.kill();
-            outputln!(preamble service.name(), "Shutdown OK: {}", shutdown_method);
+            //            outputln!(preamble service.name(), "Shutdown OK: {}", shutdown_method);
         }
     }
 
+    // TODO (CM): rename; it's not just for zombie reaping anymore
     fn reap_zombies(&mut self) {
         let mut dead: Vec<Pid> = vec![];
+
+        let now = SteadyTime::now();
+
         for service in self.0.values_mut() {
+            match service.get_current_status() {
+                ServiceStatus::Running => {
+                    match service.try_wait() {
+                        Ok(None) => (),
+                        Ok(Some(code)) => {
+                            outputln!(
+                                "Child for service '{}' with PID {} exited with code {}",
+                                service.name(),
+                                service.id(),
+                                code
+                            );
+
+                            // TODO (CM): The supervisor is
+                            // responsible for restarting in this
+                            // case, correct?
+
+                            // TODO (CM): clearly delineate separation
+                            // of responsibilities between Supervisor
+                            // and Launcher
+                            dead.push(service.id());
+                        }
+                        Err(err) => {
+                            warn!("Error waiting for child, {}, {}", service.id(), err);
+                            dead.push(service.id());
+                        }
+                    }
+                }
+                ServiceStatus::ShuttingDown => {
+                    if service.kill_time.is_some() {
+                        if now >= service.kill_time.unwrap() {
+                            // TODO: taking too long; KILL IT
+                        } else {
+                            // hasn't timed out yet; keep waiting
+                        }
+                    } else {
+                        // infinite timeout; keep waiting
+                    }
+
+                }
+                ServiceStatus::Restarting => {
+                    if service.kill_time.is_some() && now >= service.kill_time.unwrap() {
+                        // taking too long; KILL IT
+
+                        service.kill();
+                        match service.wait() {
+                            Ok(_status) => {
+                                match service::run(service.take_args()) {
+                                    Ok(new_service) => {
+                                        let mut reply = protocol::SpawnOk::new();
+                                        reply.set_pid(new_service.id().into());
+                                        services.insert(new_service);
+                                        Ok(reply)
+                                    }
+                                    Err(err) => Err(protocol::error(err)),
+                                }
+                            }
+                            Err(err) => Err(protocol::error(err)),
+                        }
+
+
+                    }
+                }
+            }
+
+
+
+
+            // if it was shutting down, we need to remove it
+
+            // if it was restarting, we need to restart it
+
+            // if it exceeded it's shutdown time, we need to
+            // KILL it
+
+
+
+
+
+
+
             match service.try_wait() {
                 Ok(None) => (),
                 Ok(Some(code)) => {
@@ -206,7 +294,17 @@ impl ServiceTable {
                         service.id(),
                         code
                     );
+
+                    // if it was shutting down, we need to remove it
                     dead.push(service.id());
+
+                    // if it was restarting, we need to restart it
+
+                    // if it exceeded it's shutdown time, we need to
+                    // KILL it
+
+
+
                 }
                 Err(err) => {
                     warn!("Error waiting for child, {}, {}", service.id(), err);

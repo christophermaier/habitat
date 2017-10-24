@@ -21,3 +21,19 @@ mod imp;
 #[cfg(windows)]
 #[path = "windows/mod.rs"]
 mod imp;
+
+// use protocol::ShutdownMethod;
+// use std::os::unix::process::{CommandExt, ExitStatusExt};
+// use core::os::process::windows_child::{Child, ExitStatus, Handle};
+
+// pub trait SupervisedProcess {
+//     fn id(&self) -> Pid;
+
+//     fn shutdown(&mut self); // TODO (CM): Return value?
+
+//     fn kill(&mut self) -> ShutdownMethod;
+
+//     fn try_wait(&mut self) -> Result<Option<ExitStatus>>;
+
+//     fn wait(&mut self) -> Result<ExitStatus>;
+// }

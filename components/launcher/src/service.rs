@@ -27,11 +27,50 @@ use protocol;
 pub use sys::service::*;
 use error::Result;
 
+use time::SteadyTime;
+
+
+// TODO (CM): want a top-level module for this
+//
+// along with a Trait that defines how the ServiceTable interacts with
+// these things.
+//
+// along with an enum over all types of services, which ServiceTable
+// is implemented in terms of.
+
+// TODO (CM): I don't like the naming of this, but it captures the
+// concept. I'd prefer to not just have bool values flying around,
+// since named Enum values are more self-describing.
+
+pub enum ServiceStatus {
+    Running,
+    ShuttingDown,
+    Restarting,
+
+    // Starting?
+}
+
+impl Default for ServiceStatus {
+    fn default() -> Self {
+        ServiceStatus::Running
+    }
+}
+
 pub struct Service {
     args: protocol::Spawn,
     process: Process,
     status: Option<ExitStatus>,
+
+    current_status: ServiceStatus,
+    kill_time: Option<SteadyTime>, // OK, this is when we don't have None == Infinite
 }
+
+
+
+
+
+
+
 
 impl Service {
     pub fn new(
@@ -58,6 +97,9 @@ impl Service {
             args: spawn,
             process: process,
             status: None,
+
+            current_status: Default::default(),
+            kill_time: None, // TODO (CM): really None, not Infinite
         }
     }
 
@@ -69,10 +111,19 @@ impl Service {
         self.process.id()
     }
 
+    // TODO (CM): rename to "shutdown"
+
     /// Attempt to gracefully terminate a proccess and then forcefully kill it after
     /// 8 seconds if it has not terminated.
-    pub fn kill(&mut self) -> protocol::ShutdownMethod {
-        self.process.kill()
+
+    // TODO (CM): return shutdown time instead of ShutdownMethod, I think.
+
+
+    // TODO (CM): or return nothing?
+
+    pub fn kill(&mut self) {
+        let kill_time = self.process.kill();
+        self.kill_time = kill_time;
     }
 
     pub fn name(&self) -> &str {
@@ -89,6 +140,16 @@ impl Service {
 
     pub fn wait(&mut self) -> Result<ExitStatus> {
         self.process.wait()
+    }
+
+    pub fn set_current_status(&mut self, status: ServiceStatus) {
+        // TODO (CM): any kind of FSM-style logic we want to have
+        // around this?
+        self.current_status = status;
+    }
+
+    pub fn get_current_status(&self) {
+        self.current_status
     }
 }
 

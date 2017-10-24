@@ -46,31 +46,35 @@ impl Process {
         unsafe { kernel32::GetProcessId(self.handle.raw()) as u32 }
     }
 
-    pub fn kill(&mut self) -> ShutdownMethod {
-        if self.status().is_some() {
-            return ShutdownMethod::AlreadyExited;
-        }
-        let ret = unsafe { kernel32::GenerateConsoleCtrlEvent(1, self.id()) };
-        if ret == 0 {
-            debug!(
-                "Failed to send ctrl-break to pid {}: {}",
-                self.id(),
-                io::Error::last_os_error()
-            );
-        }
+    // TODO (CM): MAKE THIS WORK WHEN YOU GET A WINDOWS MACHINE
+
+    pub fn kill(&mut self) -> Option<SteadyTime> {
+        // if self.status().is_some() {
+        //     return ShutdownMethod::AlreadyExited;
+        // }
+        // let ret = unsafe { kernel32::GenerateConsoleCtrlEvent(1, self.id()) };
+        // if ret == 0 {
+        //     debug!(
+        //         "Failed to send ctrl-break to pid {}: {}",
+        //         self.id(),
+        //         io::Error::last_os_error()
+        //     );
+        // }
 
         let stop_time = SteadyTime::now() + Duration::seconds(8);
-        loop {
-            if ret == 0 || SteadyTime::now() > stop_time {
-                let proc_table = build_proc_table();
-                terminate_process_descendants(&proc_table, self.id());
-                return ShutdownMethod::Killed;
-            }
+        // loop {
+        //     if ret == 0 || SteadyTime::now() > stop_time {
+        //         let proc_table = build_proc_table();
+        //         terminate_process_descendants(&proc_table, self.id());
+        //         return ShutdownMethod::Killed;
+        //     }
 
-            if self.status().is_some() {
-                return ShutdownMethod::GracefulTermination;
-            }
-        }
+        //     if self.status().is_some() {
+        //         return ShutdownMethod::GracefulTermination;
+        //     }
+        // }
+
+        Some(stop_time)
     }
 
     pub fn wait(&mut self) -> Result<ExitStatus> {

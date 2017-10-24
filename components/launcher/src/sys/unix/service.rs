@@ -44,31 +44,41 @@ impl Process {
         self.pid
     }
 
-    /// Attempt to gracefully terminate a proccess and then forcefully kill it after
-    /// 8 seconds if it has not terminated.
-    pub fn kill(&mut self) -> ShutdownMethod {
+    // TODO (CM): rename to "shutdown"
+    // TODO (CM): we also need a straigh-up "kill" command, though
+
+    /// Return the time beyond which we need to send SIGKILL to this
+    /// process (None if we wait indefinitely)
+    pub fn kill(&mut self) -> Option<SteadyTime> {
         let pid_to_kill = self.pid_to_signal();
 
         // JW TODO: Determine if the error represents a case where the process was already
         // exited before we return out and assume so.
-        if signal(pid_to_kill, Signal::TERM).is_err() {
-            return ShutdownMethod::AlreadyExited;
-        }
+
+        // TODO (CM): what to do with this Result?
+        signal(pid_to_kill, Signal::TERM);
+
+        // if signal(pid_to_kill, Signal::TERM).is_err() {
+        //     return ShutdownMethod::AlreadyExited;
+        // }
         let stop_time = SteadyTime::now() + Duration::seconds(8);
-        loop {
-            if let Ok(Some(_status)) = self.try_wait() {
-                return ShutdownMethod::GracefulTermination;
-            }
-            if SteadyTime::now() < stop_time {
-                continue;
-            }
-            // JW TODO: Determine if the error represents a case where the process was already
-            // exited before we return out and assume so.
-            if signal(pid_to_kill, Signal::KILL).is_err() {
-                return ShutdownMethod::GracefulTermination;
-            }
-            return ShutdownMethod::Killed;
-        }
+        // loop {
+        //     if let Ok(Some(_status)) = self.try_wait() {
+        //         return ShutdownMethod::GracefulTermination;
+        //     }
+        //     if SteadyTime::now() < stop_time {
+        //         continue;
+        //     }
+        //     // JW TODO: Determine if the error represents a case where the process was already
+        //     // exited before we return out and assume so.
+        //     if signal(pid_to_kill, Signal::KILL).is_err() {
+        //         return ShutdownMethod::GracefulTermination;
+        //     }
+        //     return ShutdownMethod::Killed;
+        // }
+
+        Some(stop_time)
+
     }
 
     pub fn try_wait(&mut self) -> Result<Option<ExitStatus>> {

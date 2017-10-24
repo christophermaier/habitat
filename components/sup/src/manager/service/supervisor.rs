@@ -81,16 +81,24 @@ impl Supervisor {
         }
     }
 
+    // TODO (CM): Aaaah... this is where we can actively check state
+    // without having to receive communication from the Launcher... we
+    // just have to keep an idea of what we expect the state to be.
+    //
+    // IN THE MORNING START HERE; MUST MAKE ASYNC SHUTDOWN BEHAVE
+    // PROPERLY
+    //
+    // Test idea: Shutdown a service; run hab svc status
+
+
     /// Read from a local PID file if present, and not already
     /// tracking a PID.
     fn maybe_sync_with_pidfile(&mut self) {
-        self.pid = self.pid.or_else(||
-                                    if self.pid_file.exists() {
-                                        Some(read_pid(&self.pid_file).unwrap())
-                                    } else {
-                                        None
-                                    }
-        )
+        self.pid = self.pid.or_else(|| if self.pid_file.exists() {
+            Some(read_pid(&self.pid_file).unwrap())
+        } else {
+            None
+        })
     }
 
     /// If we have a PID and it's alive, then mark our process as up;
@@ -133,11 +141,18 @@ impl Supervisor {
         Ok(())
     }
 
+    // TODO (CM): rename to "shutdown"
     pub fn stop(&mut self, launcher: &LauncherCli) -> Result<()> {
         if self.pid.is_none() {
             return Ok(());
         }
         launcher.terminate(self.pid.unwrap())?;
+        // TODO (CM): We can only clean up the pidfile once the
+        // service is down!
+        // TODO (CM): Hrmm... this is Up/Down... not ShuttingDown
+        //
+        // It *could* be ShuttingDown IF we had a way to change that
+        // state based on async communication from the Launcher
         self.mark_process_as_dead();
         Ok(())
     }
@@ -161,6 +176,9 @@ impl Supervisor {
         match self.pid {
             Some(pid) => {
                 match launcher.restart(pid) {
+
+                    // TODO (CM): AARGH, how to make this work with
+                    // async shutdown of services?
                     Ok(pid) => {
                         self.pid = Some(pid);
                         self.create_pidfile()?;

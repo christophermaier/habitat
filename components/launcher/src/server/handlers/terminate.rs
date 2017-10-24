@@ -18,6 +18,8 @@ use protocol;
 use super::{Handler, HandleResult};
 use server::ServiceTable;
 
+use service::ServiceStatus;
+
 pub struct TerminateHandler;
 impl Handler for TerminateHandler {
     type Message = protocol::Terminate;
@@ -27,16 +29,34 @@ impl Handler for TerminateHandler {
         match services.get_mut(msg.get_pid() as Pid) {
             Some(service) => {
                 debug!("Terminating: {}", service.id());
-                let shutdown_method = service.kill();
-                match service.wait() {
-                    Ok(status) => {
-                        let mut reply = protocol::TerminateOk::new();
-                        reply.set_exit_code(status.code().unwrap_or(0));
-                        reply.set_shutdown_method(shutdown_method);
-                        Ok(reply)
-                    }
-                    Err(err) => Err(protocol::error(err)),
-                }
+
+                // ShuttingDown(pid, kill_timeout, NoRestart)
+                //
+                // Add this into ServiceTable (swap out existing
+                // representation, though)
+                service.kill();
+                service.set_current_status(ServiceStatus::ShuttingDown);
+
+
+                // remove service from ServiceTable
+                // Add back as a ShuttingDown
+
+
+                let reply = protocol::TerminateOk::new();
+                // reply.set_exit_code(status.code().unwrap_or(0));
+                // reply.set_shutdown_method(shutdown_method);
+                Ok(reply)
+
+
+                // match service.wait() {
+                //     Ok(status) => {
+                //         let mut reply = protocol::TerminateOk::new();
+                //         reply.set_exit_code(status.code().unwrap_or(0));
+                //         reply.set_shutdown_method(shutdown_method);
+                //         Ok(reply)
+                //     }
+                //     Err(err) => Err(protocol::error(err)),
+                // }
             }
             None => {
                 let mut reply = protocol::NetErr::new();

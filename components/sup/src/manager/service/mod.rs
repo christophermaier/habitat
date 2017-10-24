@@ -82,6 +82,9 @@ pub struct Service {
     pub cfg: Cfg,
     pub pkg: Pkg,
     pub sys: Arc<Sys>,
+
+    /// Has the init hook (if it exists) been run for this service
+    /// yet? 
     pub initialized: bool,
 
     #[serde(skip_serializing)]
@@ -282,6 +285,9 @@ impl Service {
         }
     }
 
+    // TODO (CM): this is how long the service has been in its current
+    // state (currently, either up or down, but might be "shutting
+    // down" soon
     pub fn last_state_change(&self) -> Timespec {
         self.supervisor.state_entered
     }

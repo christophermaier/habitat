@@ -328,8 +328,7 @@
 source_dir=$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )
 source "${source_dir}/public.sh"
 source "${source_dir}/shared.sh"
-
-
+source "${source_dir}/environment.sh"
 
 # Fail when commands return a non-zero return code.
 set -e
@@ -1883,6 +1882,9 @@ _build_metadata() {
   _render_metadata_CXXFLAGS
   _render_metadata_PKG_CONFIG_PATH
   _render_metadata_BUILD_ENVIRONMENT
+
+  _render_metadata_BUILDTIME_ENVIRONMENT
+  _render_metadata_BUILDTIME_ENVIRONMENT_PROVENANCE
   _render_metadata_ENVIRONMENT
   _render_metadata_ENVIRONMENT_SEP
   _render_metadata_PATH
@@ -1898,6 +1900,8 @@ _build_metadata() {
   _render_metadata_TARGET
   _render_metadata_TYPE
   _render_metadata_IDENT
+  _render_metadata_RUNTIME_ENVIRONMENT
+  _render_metadata_RUNTIME_ENVIRONMENT_PROVENANCE
 
   # Only generate `SVC_USER` & `SVC_GROUP` files if this package is a service.
   # We determine this by checking if there is a `hooks/run` script and/or
@@ -2395,6 +2399,8 @@ case "${pkg_type}" in
 
         # Set up runtime environment
         _set_environment
+
+        do_setup_environment_wrapper
 
         mkdir -pv "$HAB_CACHE_SRC_PATH"
 

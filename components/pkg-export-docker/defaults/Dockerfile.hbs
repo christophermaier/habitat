@@ -1,7 +1,11 @@
 FROM scratch
 ENV PATH {{path}}
 ADD {{rootfs}} /
+{{#each volumes}}
+RUN mkdir {{this}}
+RUN chmod g=u {{this}}
 VOLUME {{volumes}}
+{{/each}}
 EXPOSE 9631 {{exposes}}
 ENTRYPOINT ["/init.sh"]
 CMD ["start", "{{primary_svc_ident}}"]

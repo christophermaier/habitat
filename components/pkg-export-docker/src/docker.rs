@@ -454,7 +454,7 @@ impl DockerBuildRoot {
         let json = json!({
             "rootfs": ctx.rootfs().file_name().expect("file_name exists").to_string_lossy().as_ref(),
             "path": ctx.env_path(),
-            "volumes": ctx.svc_volumes().join(" "),
+            "volumes": ctx.svc_volumes(),
             "exposes": ctx.svc_exposes().join(" "),
             "primary_svc_ident": ctx.primary_svc_ident().to_string(),
         });

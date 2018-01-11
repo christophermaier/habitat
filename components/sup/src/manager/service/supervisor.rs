@@ -27,6 +27,7 @@ use std::path::{Path, PathBuf};
 use hcore::os::process::{self, Pid};
 use std::result;
 
+use hcore::os::users;
 use hcore::service::ServiceGroup;
 use launcher_client::LauncherCli;
 use serde::{Serialize, Serializer};
@@ -36,6 +37,7 @@ use time::{self, Timespec};
 use error::{Result, Error};
 use fs;
 use manager::service::Pkg;
+use sys::abilities;
 
 static LOGKEY: &'static str = "SV";
 
@@ -111,16 +113,32 @@ impl Supervisor {
     where
         T: ToString,
     {
+        // TODO (CM): DON'T UNWRAP HERE!! This will fail if there are
+        // no entries in /etc/passwd or /etc/group!
+        let current_user = users::get_current_username().unwrap();
+        let current_group = users::get_current_groupname().unwrap();
+
+
+        let (service_user, service_group) = if abilities::can_set_process_user_and_group() {
+            (&pkg.svc_user, &pkg.svc_group)
+        } else {
+
+            outputln!(preamble self.preamble, "Current user ({}) lacks both CAP_SETUID and CAP_SETGID capabilities; grant these if you wish to run services as other users!", current_user);
+            (&current_user, &current_group)
+        };
+
         outputln!(preamble self.preamble,
-            "Starting service as user={}, group={}", &pkg.svc_user, &pkg.svc_group);
+                  "Starting service as user={}, group={}", service_user, service_group);
+
         let pid = launcher.spawn(
             group.to_string(),
             &pkg.svc_run,
-            &pkg.svc_user,
-            &pkg.svc_group,
+            service_user,
+            service_group,
             svc_password,
             (*pkg.env).clone(),
         )?;
+
         self.pid = Some(pid);
         self.create_pidfile()?;
         self.change_state(ProcessState::Up);

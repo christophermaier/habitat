@@ -19,6 +19,7 @@ ansi_term = "*"
 base64 = "*"
 bitflags = "*"
 byteorder = "*"
+caps = "*"
 clap = { version = "*", features = [ "suggestions", "color", "unstable" ] }
 env_logger = "*"
 features = "*"

@@ -53,6 +53,8 @@ use census::{ServiceFile, CensusRing, ElectionStatus};
 use templating::RenderContext;
 use util;
 
+use sys::abilities;
+
 pub use self::config::Cfg;
 pub use self::health::{HealthCheck, SmokeCheck};
 pub use self::package::Pkg;
@@ -189,7 +191,14 @@ impl Service {
     /// Create the service path for this package.
     pub fn create_svc_path(&self) -> Result<()> {
         debug!("{}, Creating svc paths", self.service_group);
-        util::users::assert_pkg_user_and_group(&self.pkg.svc_user, &self.pkg.svc_group)?;
+
+        if abilities::can_change_ownership() {
+            // The only reason we assert that these users exist is
+            // because our `set_owner` calls will fail if they
+            // don't. If we don't have the ability to to change
+            // ownership, however, it doesn't really matter!
+            util::users::assert_pkg_user_and_group(&self.pkg.svc_user, &self.pkg.svc_group)?;
+        }
 
         Self::create_dir_all(&self.pkg.svc_path)?;
 
@@ -199,41 +208,62 @@ impl Service {
 
         // Create service writable directories
         Self::create_dir_all(&self.pkg.svc_config_path)?;
-        set_owner(
-            &self.pkg.svc_config_path,
-            &self.pkg.svc_user,
-            &self.pkg.svc_group,
-        )?;
+
+        // TODO (CM): this probably needs to be pulled up into
+        // set_owner, but renamed to maybe_set_owner, or
+        // set_owner_if_allowed, etc.
+        if abilities::can_change_ownership() {
+            set_owner(
+                &self.pkg.svc_config_path,
+                &self.pkg.svc_user,
+                &self.pkg.svc_group,
+            )?;
+        }
+        // TODO (CM): should set_permissions be pulled up into this if statement?
+
         set_permissions(&self.pkg.svc_config_path, SVC_DIR_PERMISSIONS)?;
+
         Self::create_dir_all(&self.pkg.svc_data_path)?;
-        set_owner(
-            &self.pkg.svc_data_path,
-            &self.pkg.svc_user,
-            &self.pkg.svc_group,
-        )?;
+        if abilities::can_change_ownership() {
+            set_owner(
+                &self.pkg.svc_data_path,
+                &self.pkg.svc_user,
+                &self.pkg.svc_group,
+            )?;
+        }
         set_permissions(&self.pkg.svc_data_path, SVC_DIR_PERMISSIONS)?;
+
         Self::create_dir_all(&self.pkg.svc_files_path)?;
-        set_owner(
-            &self.pkg.svc_files_path,
-            &self.pkg.svc_user,
-            &self.pkg.svc_group,
-        )?;
+        if abilities::can_change_ownership() {
+            set_owner(
+                &self.pkg.svc_files_path,
+                &self.pkg.svc_user,
+                &self.pkg.svc_group,
+            )?;
+        }
         set_permissions(&self.pkg.svc_files_path, SVC_DIR_PERMISSIONS)?;
+
         Self::create_dir_all(&self.pkg.svc_var_path)?;
-        set_owner(
-            &self.pkg.svc_var_path,
-            &self.pkg.svc_user,
-            &self.pkg.svc_group,
-        )?;
+        if abilities::can_change_ownership() {
+            set_owner(
+                &self.pkg.svc_var_path,
+                &self.pkg.svc_user,
+                &self.pkg.svc_group,
+            )?;
+        }
         set_permissions(&self.pkg.svc_var_path, SVC_DIR_PERMISSIONS)?;
+
         Self::remove_symlink(&self.pkg.svc_static_path)?;
         Self::create_dir_all(&self.pkg.svc_static_path)?;
-        set_owner(
-            &self.pkg.svc_static_path,
-            &self.pkg.svc_user,
-            &self.pkg.svc_group,
-        )?;
+        if abilities::can_change_ownership() {
+            set_owner(
+                &self.pkg.svc_static_path,
+                &self.pkg.svc_user,
+                &self.pkg.svc_group,
+            )?;
+        }
         set_permissions(&self.pkg.svc_static_path, SVC_DIR_PERMISSIONS)?;
+
         Ok(())
     }
 

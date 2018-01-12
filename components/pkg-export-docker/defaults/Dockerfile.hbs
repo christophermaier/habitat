@@ -21,6 +21,8 @@ RUN chown -R {{primary_user_id}}:{{primary_group_id}} /hab
 ENV HAB_NON_ROOT=1
 {{/if}}
 
+# Needed for entrypoint hacking of /etc/passwd
+RUN chmod g=u /etc/passwd
 USER {{primary_user_id}}:{{primary_group_id}}
 
 EXPOSE 9631 {{exposes}}

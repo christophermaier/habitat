@@ -833,12 +833,16 @@ impl Service {
                       file.as_ref().display(), e);
             return false;
         }
-        if let Err(e) = set_owner(&file, &self.pkg.svc_user, &self.pkg.svc_group) {
-            outputln!(preamble self.service_group,
-                      "Failed to set ownership of cache file {}, {}",
-                      file.as_ref().display(), e);
-            return false;
+
+        if abilities::can_change_ownership() {
+            if let Err(e) = set_owner(&file, &self.pkg.svc_user, &self.pkg.svc_group) {
+                outputln!(preamble self.service_group,
+                          "Failed to set ownership of cache file {}, {}",
+                          file.as_ref().display(), e);
+                return false;
+            }
         }
+
         if let Err(e) = set_permissions(&file, GOSSIP_FILE_PERMISSIONS) {
             outputln!(preamble self.service_group,
                       "Failed to set permissions on cache file {}, {}",

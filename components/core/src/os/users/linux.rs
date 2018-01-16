@@ -37,6 +37,12 @@ pub fn get_effective_uid() -> u32 {
     linux_users::get_effective_uid()
 }
 
+// This is Option to harmonize with the Windows implementation, which
+// will always return None.
+pub fn get_effective_gid() -> Option<u32> {
+    Some(linux_users::get_effective_gid())
+}
+
 pub fn get_home_for_user(username: &str) -> Option<PathBuf> {
     linux_users::get_user_by_name(username).map(|u| PathBuf::from(u.home_dir()))
 }

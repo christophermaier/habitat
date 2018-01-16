@@ -115,12 +115,18 @@ impl LauncherCli {
     }
 
     /// Send a process spawn command to the connected Launcher
+    ///
+    /// `user` and `group` are string names, while `user_id` and
+    /// `group_id` are numeric IDs. Newer versions of the Launcher can
+    /// accept either, but prefer numeric IDs.
     pub fn spawn<I, B, U, G, P>(
         &self,
         id: I,
         bin: B,
         user: U,
         group: G,
+        user_id: Option<u32>,
+        group_id: Option<u32>,
         password: Option<P>,
         env: Env,
     ) -> Result<Pid>
@@ -133,8 +139,19 @@ impl LauncherCli {
     {
         let mut msg = protocol::Spawn::new();
         msg.set_binary(bin.as_ref().to_path_buf().to_string_lossy().into_owned());
+
+        // TODO (CM): MAKE THESE OPTIONAL
+        // TODO (CM): Take an Option<(String,String)> or Option<(u32, u32)>
         msg.set_svc_user(user.to_string());
         msg.set_svc_group(group.to_string());
+
+        if let Some(uid) = user_id {
+            msg.set_svc_user_id(uid);
+        }
+        if let Some(gid) = group_id {
+            msg.set_svc_group_id(gid);
+        }
+
         if let Some(password) = password {
             msg.set_svc_password(password.to_string());
         }

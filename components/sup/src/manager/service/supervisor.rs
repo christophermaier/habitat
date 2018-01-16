@@ -113,28 +113,77 @@ impl Supervisor {
     where
         T: ToString,
     {
+
         // TODO (CM): DON'T UNWRAP HERE!! This will fail if there are
         // no entries in /etc/passwd or /etc/group!
-        let current_user = users::get_current_username().unwrap();
-        let current_group = users::get_current_groupname().unwrap();
 
+        // TODO (CM): Should we be using effective IDs here?
 
-        let (service_user, service_group) = if abilities::can_set_process_user_and_group() {
-            (&pkg.svc_user, &pkg.svc_group)
+        // TODO (CM): Need to document assumptions across Linux and
+        // Windows here w/r/t identifiers.
+
+        let current_user = users::get_current_username(); // option
+        let current_user_id = Some(users::get_effective_uid());
+
+        let current_group = users::get_current_groupname(); //option
+        let current_group_id = users::get_effective_gid();
+
+        let (service_user, service_user_id, service_group, service_group_id) = if abilities::can_set_process_user_and_group() {
+            // We have the ability to run services as a user / group other
+            // than ourselves, so they better exist
+            let user_id = users::get_uid_by_name(&pkg.svc_user).ok_or(
+                sup_error!(Error::UserNotFound(pkg.svc_user.to_string())),
+            )?;
+
+            // TODO (CM): ugh, this is going to screw up Windows, I
+            // think... need to split out this whole thing to a
+            // separate function
+            let group_id = users::get_gid_by_name(&pkg.svc_group).ok_or(
+                sup_error!(Error::GroupNotFound(pkg.svc_group.to_string())),
+            )?;
+
+            (Some(pkg.svc_user.clone()), Some(user_id), Some(pkg.svc_group.clone()), Some(group_id))
         } else {
+            // We DO NOT have the ability to run as other users!
+            let name_of_user = match current_user {
+                None => {
+                    match current_user_id {
+                        Some(uid) => format!("anonymous [UID={}]", uid),
+                        _ => unreachable!()
+                    }
+                },
+                Some(ref name) => name.clone()
+            };
+            outputln!(preamble self.preamble, "Current user ({}) lacks both CAP_SETUID and CAP_SETGID capabilities; grant these if you wish to run services as other users!", name_of_user);
 
-            outputln!(preamble self.preamble, "Current user ({}) lacks both CAP_SETUID and CAP_SETGID capabilities; grant these if you wish to run services as other users!", current_user);
-            (&current_user, &current_group)
+            (current_user, current_user_id, current_group, current_group_id)
         };
 
         outputln!(preamble self.preamble,
-                  "Starting service as user={}, group={}", service_user, service_group);
+                  "Starting service as user={}, group={}",
+                  service_user.clone().unwrap_or(String::from("anonymous")),
+                  service_group.clone().unwrap_or(String::from("anonymous")));
 
         let pid = launcher.spawn(
             group.to_string(),
             &pkg.svc_run,
-            service_user,
-            service_group,
+
+            // Must include user and group name for dealing with older
+            // clients
+            //
+            // TODO (CM): confirm that older launchers will just die
+            // with unset or bad user/group
+
+            // TODO (CM): I want user/group to be optional here
+
+            // Note that windows needs service user, so we can't get
+            // rid of that.
+            service_user.unwrap_or(String::from("")),
+            service_group.unwrap_or(String::from("")),
+
+            service_user_id,
+            service_group_id,
+
             svc_password,
             (*pkg.env).clone(),
         )?;

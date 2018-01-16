@@ -48,13 +48,18 @@ pub fn get_current_username() -> Option<String> {
     }
 }
 
-// this is a no-op on windows
+// This is a no-op on windows
 pub fn get_current_groupname() -> Option<String> {
     Some(String::new())
 }
 
 pub fn get_effective_uid() -> u32 {
     unsafe { GetUserTokenStatus() }
+}
+
+// This is a no-op on Windows
+pub fn get_effective_gid() -> Option<u32> {
+    None
 }
 
 pub fn get_home_for_user(username: &str) -> Option<PathBuf> {

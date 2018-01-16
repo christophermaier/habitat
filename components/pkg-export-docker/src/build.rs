@@ -408,6 +408,9 @@ pub struct BuildRootContext {
     /// Whether or not the container should be tailored to run Habitat
     /// as a non-root user
     non_root: bool,
+
+    /// A string representation of a Habitat Package Identifer for the Habitat CLI package.
+    pub hab: String,
 }
 
 impl BuildRootContext {
@@ -458,6 +461,7 @@ impl BuildRootContext {
             user_id: spec.user_id,
             group_id: spec.group_id,
             non_root: spec.non_root,
+            hab: spec.hab.to_string(),
         };
         context.validate()?;
 

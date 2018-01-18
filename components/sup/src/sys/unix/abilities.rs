@@ -24,7 +24,8 @@ pub fn can_set_process_user_and_group() -> bool {
     has(Capability::CAP_SETUID) && has(Capability::CAP_SETGID)
 }
 
-/// Returns true if the current thread is able to change ownership of files.
+/// Returns true if the current thread is able to change ownership of
+/// files.
 pub fn can_change_ownership() -> bool {
     has(Capability::CAP_CHOWN)
 }

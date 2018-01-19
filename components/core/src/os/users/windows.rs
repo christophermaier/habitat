@@ -57,11 +57,6 @@ pub fn get_effective_uid() -> u32 {
     unsafe { GetUserTokenStatus() }
 }
 
-// This is a no-op on Windows
-pub fn get_effective_gid() -> Option<u32> {
-    None
-}
-
 pub fn get_home_for_user(username: &str) -> Option<PathBuf> {
     unimplemented!();
 }

@@ -107,14 +107,10 @@ impl Supervisor {
     #[cfg(target_os = "linux")]
     fn user_info(&self, pkg: &Pkg) -> Result<(Option<String>, Option<u32>,
                                               Option<String>, Option<u32>)> {
-
         let service_user;
         let service_user_id;
-
         let service_group;
         let service_group_id;
-
-        // TODO (CM): Should we be using effective IDs here?
 
         // TODO (CM): Need to document assumptions across Linux and
         // Windows here w/r/t identifiers.
@@ -131,37 +127,15 @@ impl Supervisor {
 
             service_user = Some(pkg.svc_user.clone());
             service_user_id = Some(user_id);
-
             service_group = Some(pkg.svc_group.clone());
             service_group_id = Some(group_id);
         } else {
             // We DO NOT have the ability to run as other users!
+            let current_user: Option<String>= users::get_effective_username();
+            let current_user_id: u32 = users::get_effective_uid();
+            let current_group: Option<String> = users::get_effective_groupname(); 
+            let current_group_id: u32 = users::get_effective_gid();
 
-
-
-            // TODO (CM): difference between uid and euid for these things...
-
-            // name of the user with the current UID (not effective)
-            //
-            // Either need get_effective_username / get_effective_uid
-            // or
-            // get_current_username / get_current_uid
-
-            // Needs to be fixed in our module
-            
-            let current_user = users::get_current_username(); // option
-            let current_user_id = users::get_effective_uid(); // u32
-
-            // Either need get_effective_groupname / get_effective_gid
-            // or
-            // get_current_groupname / get_current_gid
-            let current_group = users::get_current_groupname(); //option
-            let current_group_id = users::get_effective_gid();
-
-            // no effective username for windows
-
-
-            
             let name_of_user: String = current_user
                 .as_ref()
                 .and_then(|name| Some(name.clone()))
@@ -171,7 +145,7 @@ impl Supervisor {
             service_user = current_user;
             service_user_id = Some(current_user_id);
             service_group = current_group;
-            service_group_id = current_group_id;
+            service_group_id = Some(current_group_id);
         };
 
         Ok((service_user, service_user_id, service_group, service_group_id))
@@ -213,17 +187,18 @@ impl Supervisor {
             // TODO (CM): confirm that older launchers will just die
             // with unset or bad user/group
 
-            // TODO (CM): I want user/group to be optional here
+            // TODO (CM): I want user/group to be optional here, so I
+            // can use None rather than creating an empty
+            // string. Might not be able to and retain backward compatibility.
 
             // Note that windows needs service user, so we can't get
             // rid of that.
-            service_user.unwrap_or_else(|| String::from("")),
-            service_group.unwrap_or_else(|| String::from("")),
+            service_user.unwrap_or_else(|| String::from("")), // Windows required, Linux optional
+            service_group.unwrap_or_else(|| String::from("")), // Linux optional
+            service_user_id, // Linux preferred
+            service_group_id, // Linux preferred
 
-            service_user_id,
-            service_group_id,
-
-            svc_password,
+            svc_password, // Windows optional
             (*pkg.env).clone(),
         )?;
 

@@ -103,6 +103,87 @@ impl Supervisor {
         false
     }
 
+
+    #[cfg(target_os = "linux")]
+    fn user_info(&self, pkg: &Pkg) -> Result<(Option<String>, Option<u32>,
+                                              Option<String>, Option<u32>)> {
+
+        let service_user;
+        let service_user_id;
+
+        let service_group;
+        let service_group_id;
+
+        // TODO (CM): Should we be using effective IDs here?
+
+        // TODO (CM): Need to document assumptions across Linux and
+        // Windows here w/r/t identifiers.
+
+        if abilities::can_set_process_user_and_group() {
+            // We have the ability to run services as a user / group other
+            // than ourselves, so they better exist
+            let user_id = users::get_uid_by_name(&pkg.svc_user).ok_or(
+                sup_error!(Error::UserNotFound(pkg.svc_user.to_string())),
+            )?;
+            let group_id = users::get_gid_by_name(&pkg.svc_group).ok_or(
+                sup_error!(Error::GroupNotFound(pkg.svc_group.to_string())),
+            )?;
+
+            service_user = Some(pkg.svc_user.clone());
+            service_user_id = Some(user_id);
+
+            service_group = Some(pkg.svc_group.clone());
+            service_group_id = Some(group_id);
+        } else {
+            // We DO NOT have the ability to run as other users!
+
+
+
+            // TODO (CM): difference between uid and euid for these things...
+
+            // name of the user with the current UID (not effective)
+            //
+            // Either need get_effective_username / get_effective_uid
+            // or
+            // get_current_username / get_current_uid
+
+            // Needs to be fixed in our module
+            
+            let current_user = users::get_current_username(); // option
+            let current_user_id = users::get_effective_uid(); // u32
+
+            // Either need get_effective_groupname / get_effective_gid
+            // or
+            // get_current_groupname / get_current_gid
+            let current_group = users::get_current_groupname(); //option
+            let current_group_id = users::get_effective_gid();
+
+            // no effective username for windows
+
+
+            
+            let name_of_user: String = current_user
+                .as_ref()
+                .and_then(|name| Some(name.clone()))
+                .unwrap_or_else(|| format!("anonymous [UID={}]", current_user_id));
+            outputln!(preamble self.preamble, "Current user ({}) lacks both CAP_SETUID and CAP_SETGID capabilities; grant these if you wish to run services as other users!", name_of_user);
+
+            service_user = current_user;
+            service_user_id = Some(current_user_id);
+            service_group = current_group;
+            service_group_id = current_group_id;
+        };
+
+        Ok((service_user, service_user_id, service_group, service_group_id))
+    }
+
+    #[cfg(windows)]
+    fn user_info(&self, pkg: &Pkg) -> Result<(Option<String>, Option<u32>,
+                                              Option<String>, Option<u32>)> {
+        // Windows only really has usernames, not groups and other IDs
+        Ok((users::get_current_username(),None, None, None))
+    }
+
     pub fn start<T>(
         &mut self,
         pkg: &Pkg,
@@ -114,55 +195,13 @@ impl Supervisor {
         T: ToString,
     {
 
-        // TODO (CM): DON'T UNWRAP HERE!! This will fail if there are
-        // no entries in /etc/passwd or /etc/group!
-
-        // TODO (CM): Should we be using effective IDs here?
-
-        // TODO (CM): Need to document assumptions across Linux and
-        // Windows here w/r/t identifiers.
-
-        let current_user = users::get_current_username(); // option
-        let current_user_id = Some(users::get_effective_uid());
-
-        let current_group = users::get_current_groupname(); //option
-        let current_group_id = users::get_effective_gid();
-
-        let (service_user, service_user_id, service_group, service_group_id) = if abilities::can_set_process_user_and_group() {
-            // We have the ability to run services as a user / group other
-            // than ourselves, so they better exist
-            let user_id = users::get_uid_by_name(&pkg.svc_user).ok_or(
-                sup_error!(Error::UserNotFound(pkg.svc_user.to_string())),
-            )?;
-
-            // TODO (CM): ugh, this is going to screw up Windows, I
-            // think... need to split out this whole thing to a
-            // separate function
-            let group_id = users::get_gid_by_name(&pkg.svc_group).ok_or(
-                sup_error!(Error::GroupNotFound(pkg.svc_group.to_string())),
-            )?;
-
-            (Some(pkg.svc_user.clone()), Some(user_id), Some(pkg.svc_group.clone()), Some(group_id))
-        } else {
-            // We DO NOT have the ability to run as other users!
-            let name_of_user = match current_user {
-                None => {
-                    match current_user_id {
-                        Some(uid) => format!("anonymous [UID={}]", uid),
-                        _ => unreachable!()
-                    }
-                },
-                Some(ref name) => name.clone()
-            };
-            outputln!(preamble self.preamble, "Current user ({}) lacks both CAP_SETUID and CAP_SETGID capabilities; grant these if you wish to run services as other users!", name_of_user);
-
-            (current_user, current_user_id, current_group, current_group_id)
-        };
+        let (service_user, service_user_id, service_group, service_group_id) = self.user_info(&pkg)?;
 
         outputln!(preamble self.preamble,
                   "Starting service as user={}, group={}",
-                  service_user.clone().unwrap_or(String::from("anonymous")),
-                  service_group.clone().unwrap_or(String::from("anonymous")));
+                  service_user.as_ref().map_or("anonymous", |s| s.as_str()),
+                  service_group.as_ref().map_or("anonymous", |s| s.as_str())
+        );
 
         let pid = launcher.spawn(
             group.to_string(),
@@ -178,8 +217,8 @@ impl Supervisor {
 
             // Note that windows needs service user, so we can't get
             // rid of that.
-            service_user.unwrap_or(String::from("")),
-            service_group.unwrap_or(String::from("")),
+            service_user.unwrap_or_else(|| String::from("")),
+            service_group.unwrap_or_else(|| String::from("")),
 
             service_user_id,
             service_group_id,

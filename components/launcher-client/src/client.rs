@@ -123,8 +123,8 @@ impl LauncherCli {
         &self,
         id: I,
         bin: B,
-        user: U,
-        group: G,
+        user: Option<U>,
+        group: Option<G>,
         user_id: Option<u32>,
         group_id: Option<u32>,
         password: Option<P>,
@@ -140,11 +140,18 @@ impl LauncherCli {
         let mut msg = protocol::Spawn::new();
         msg.set_binary(bin.as_ref().to_path_buf().to_string_lossy().into_owned());
 
-        // TODO (CM): MAKE THESE OPTIONAL
-        // TODO (CM): Take an Option<(String,String)> or Option<(u32, u32)>
-        msg.set_svc_user(user.to_string());
-        msg.set_svc_group(group.to_string());
-
+        // On Windows, we only expect user to be Some.
+        //
+        // On Linux, we expect user_id and group_id to be Some, while
+        // user and group may be either Some or None. Only the IDs are
+        // used; names are only for backward compatibility with older
+        // Launchers.
+        if let Some(name) = user {
+            msg.set_svc_user(name.to_string());
+        }
+        if let Some(name) = group {
+            msg.set_svc_group(name.to_string());
+        }
         if let Some(uid) = user_id {
             msg.set_svc_user_id(uid);
         }
@@ -152,6 +159,7 @@ impl LauncherCli {
             msg.set_svc_group_id(gid);
         }
 
+        // This is only for Windows
         if let Some(password) = password {
             msg.set_svc_password(password.to_string());
         }

@@ -106,11 +106,11 @@ impl Supervisor {
     // TODO (CM): this return type is GROSS; can we have different
     // type implementations across architectures?
 
+    // NOTE: the &self argument is only used to get access to
+    // self.preamble, and even then only for Linux :/
     #[cfg(target_os = "linux")]
     fn user_info(&self, pkg: &Pkg) -> Result<(Option<String>, Option<u32>,
                                               Option<String>, Option<u32>)> {
-        // TODO (CM): Need to document assumptions across Linux and
-        // Windows here w/r/t identifiers.
         if abilities::can_set_process_user_and_group() {
             // We have the ability to run services as a user / group other
             // than ourselves, so they better exist
@@ -144,8 +144,13 @@ impl Supervisor {
     #[cfg(windows)]
     fn user_info(&self, pkg: &Pkg) -> Result<(Option<String>, Option<u32>,
                                               Option<String>, Option<u32>)> {
-        // Windows only really has usernames, not groups and other IDs
-        Ok((users::get_current_username(), None, None, None))
+        // Windows only really has usernames, not groups and other
+        // IDs.
+        //
+        // Note that the Windows Supervisor does not yet have a
+        // corresponding "non-root" behavior, as the Linux version
+        // does; services run as the service user.
+        Ok((Some(pkg.svc_user.clone()), None, None, None))
     }
 
     pub fn start<T>(
@@ -163,28 +168,34 @@ impl Supervisor {
 
         outputln!(preamble self.preamble,
                   "Starting service as user={}, group={}",
-                  service_user.as_ref().map_or("anonymous", |s| s.as_str()),
-                  service_group.as_ref().map_or("anonymous", |s| s.as_str())
+                  service_user.as_ref().map_or("<anonymous>", |s| s.as_str()),
+                  service_group.as_ref().map_or("<anonymous>", |s| s.as_str())
         );
 
+        // In the interests of having as little logic in the Launcher
+        // as possible, and to support cloud-native uses of the
+        // Supervisor, in which the user running the Supervisor
+        // doesn't necessarily have a username (or groupname), we only
+        // pass the Launcher the bare minimum it needs to launch a
+        // service.
+        //
+        // For Linux, that amounts to the UID and GID to run the
+        // process as.
+        //
+        // For Windows, it's the name of the service user (no
+        // "non-root" behavior there, yet).
+        //
+        // To support backwards compatibility, however, we must still
+        // pass along values for the username and groupname; older
+        // Launcher versions on Linux (and current Windows versions)
+        // will use these, while newer versions will prefer the UID
+        // and GID, ignoring the names.
         let pid = launcher.spawn(
             group.to_string(),
             &pkg.svc_run,
 
-            // Must include user and group name for dealing with older
-            // clients
-            //
-            // TODO (CM): confirm that older launchers will just die
-            // with unset or bad user/group
-
-            // TODO (CM): I want user/group to be optional here, so I
-            // can use None rather than creating an empty
-            // string. Might not be able to and retain backward compatibility.
-
-            // Note that windows needs service user, so we can't get
-            // rid of that.
-            service_user.unwrap_or_else(|| String::from("")), // Windows required, Linux optional
-            service_group.unwrap_or_else(|| String::from("")), // Linux optional
+            service_user, // Windows required, Linux optional
+            service_group, // Linux optional
             service_user_id, // Linux preferred
             service_group_id, // Linux preferred
 

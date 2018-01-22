@@ -119,8 +119,6 @@ pub fn run(msg: protocol::Spawn) -> Result<Service> {
     debug!("launcher is spawning {}", msg.get_binary());
     let mut cmd = Command::new(msg.get_binary());
 
-    // AH! UIDs and GIDs only apply on Linux, not Windows!
-
     // Favor explicitly set UID/GID over names when present
     let uid = if msg.has_svc_user_id() {
         msg.get_svc_user_id()

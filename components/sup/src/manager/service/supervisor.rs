@@ -103,59 +103,49 @@ impl Supervisor {
         false
     }
 
+    // TODO (CM): this return type is GROSS; can we have different
+    // type implementations across architectures?
 
     #[cfg(target_os = "linux")]
     fn user_info(&self, pkg: &Pkg) -> Result<(Option<String>, Option<u32>,
                                               Option<String>, Option<u32>)> {
-        let service_user;
-        let service_user_id;
-        let service_group;
-        let service_group_id;
-
         // TODO (CM): Need to document assumptions across Linux and
         // Windows here w/r/t identifiers.
-
         if abilities::can_set_process_user_and_group() {
             // We have the ability to run services as a user / group other
             // than ourselves, so they better exist
-            let user_id = users::get_uid_by_name(&pkg.svc_user).ok_or(
+            let uid = users::get_uid_by_name(&pkg.svc_user).ok_or(
                 sup_error!(Error::UserNotFound(pkg.svc_user.to_string())),
             )?;
-            let group_id = users::get_gid_by_name(&pkg.svc_group).ok_or(
+            let gid = users::get_gid_by_name(&pkg.svc_group).ok_or(
                 sup_error!(Error::GroupNotFound(pkg.svc_group.to_string())),
             )?;
 
-            service_user = Some(pkg.svc_user.clone());
-            service_user_id = Some(user_id);
-            service_group = Some(pkg.svc_group.clone());
-            service_group_id = Some(group_id);
+            Ok((Some(pkg.svc_user.clone()), Some(uid), Some(pkg.svc_group.clone()), Some(gid)))
         } else {
-            // We DO NOT have the ability to run as other users!
-            let current_user: Option<String>= users::get_effective_username();
-            let current_user_id: u32 = users::get_effective_uid();
-            let current_group: Option<String> = users::get_effective_groupname(); 
-            let current_group_id: u32 = users::get_effective_gid();
+            // We DO NOT have the ability to run as other users!  Also
+            // note that we legitimately may not have a username or
+            // groupname.
+            let username = users::get_effective_username();
+            let uid = users::get_effective_uid();
+            let groupname = users::get_effective_groupname(); 
+            let gid = users::get_effective_gid();
 
-            let name_of_user: String = current_user
+            let name_for_logging = username
                 .as_ref()
-                .and_then(|name| Some(name.clone()))
-                .unwrap_or_else(|| format!("anonymous [UID={}]", current_user_id));
-            outputln!(preamble self.preamble, "Current user ({}) lacks both CAP_SETUID and CAP_SETGID capabilities; grant these if you wish to run services as other users!", name_of_user);
+                .map(|name| name.clone())
+                .unwrap_or_else(|| format!("anonymous [UID={}]", uid));
+            outputln!(preamble self.preamble, "Current user ({}) lacks both CAP_SETUID and CAP_SETGID capabilities; grant these if you wish to run services as other users!", name_for_logging);
 
-            service_user = current_user;
-            service_user_id = Some(current_user_id);
-            service_group = current_group;
-            service_group_id = Some(current_group_id);
-        };
-
-        Ok((service_user, service_user_id, service_group, service_group_id))
+            Ok((username, Some(uid), groupname, Some(gid)))
+        }
     }
 
     #[cfg(windows)]
     fn user_info(&self, pkg: &Pkg) -> Result<(Option<String>, Option<u32>,
                                               Option<String>, Option<u32>)> {
         // Windows only really has usernames, not groups and other IDs
-        Ok((users::get_current_username(),None, None, None))
+        Ok((users::get_current_username(), None, None, None))
     }
 
     pub fn start<T>(

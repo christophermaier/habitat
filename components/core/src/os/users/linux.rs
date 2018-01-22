@@ -33,6 +33,10 @@ pub fn get_current_groupname() -> Option<String> {
     linux_users::get_current_groupname()
 }
 
+pub fn get_effective_username() -> Option<String> {
+    linux_users::get_effective_username()
+}
+
 pub fn get_effective_uid() -> u32 {
     linux_users::get_effective_uid()
 }

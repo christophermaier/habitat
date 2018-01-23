@@ -125,6 +125,9 @@ pub trait Hook: fmt::Debug + Sized {
     where
         T: ToString,
     {
+
+        // The proper user needs to be piped down to here; otherwise
+        // they won't have permission to execute as the right user!
         let mut child = match exec::run(self.path(), &pkg, svc_encrypted_password) {
             Ok(child) => child,
             Err(err) => {

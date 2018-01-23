@@ -454,7 +454,13 @@ impl DockerBuildRoot {
                 .as_ref(),
             "path": ctx.env_path(),
             "hab_path": util::pkg_path_for(
-                &PackageIdent::from_str(&ctx.hab)?,
+
+
+                // TODO (CM): OK, for this to really work, it needs to
+                // respect file paths AND idents
+
+//                &PackageIdent::from_str(&ctx.hab)?,
+                &PackageIdent::from_str("core/hab")?,
                 ctx.rootfs())?.join("bin/hab")
                 .to_string_lossy()
                 .replace("\\", "/"),

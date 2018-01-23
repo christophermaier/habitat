@@ -98,10 +98,15 @@ where
     F: AsRef<Path>,
 {
     let fs_root_path = fs_root_path.as_ref();
+    println!(">>>>>>> pkg_ident = {:?}", pkg_ident);
+    println!(">>>>>>> fs_root_path = {:?}", fs_root_path);
 
     let pkg_path = PackageInstall::load(&pkg_ident, Some(fs_root_path))?;
+    println!(">>>>>>> pkg_path = {:?}", pkg_path);
     for bin_path in pkg_path.paths()? {
+        println!(">>>>>>> bin_path = {:?}", bin_path);
         for bin in fs::read_dir(fs_root_path.join(bin_path.strip_prefix("/")?))? {
+            println!(">>>>>>> bin = {:?}", bin);
             let bin_file = bin?;
             let bin_name = match bin_file.file_name().to_str() {
                 Some(bn) => bn.to_owned(),

@@ -49,6 +49,7 @@ pub fn get_current_username() -> Option<String> {
 }
 
 // This is a no-op on windows
+// TODO (CM): Why does this return Some(""), rather than None?
 pub fn get_current_groupname() -> Option<String> {
     Some(String::new())
 }

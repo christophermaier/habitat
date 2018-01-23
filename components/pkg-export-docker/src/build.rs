@@ -236,6 +236,9 @@ impl<'a> BuildSpec<'a> {
     ) -> Result<()> {
         let dst = util::bin_path();
         for pkg in user_pkgs.iter() {
+            debug!("Binlinking {:?}", pkg);
+            println!(">>>>>>> ohai");
+
             hab::command::pkg::binlink::binlink_all_in_pkg(ui, &pkg, &dst, rootfs.as_ref(), true)
                 .map_err(SyncFailure::new)?;
         }

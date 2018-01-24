@@ -69,12 +69,6 @@ pub struct BuildSpec<'a> {
     /// A list of either Habitat Package Identifiers or local paths to Habitat Artifact files which
     /// will be installed.
     pub idents_or_archives: Vec<&'a str>,
-    /// Numeric user ID of the user
-    pub user_id: u32,
-    /// Numeric user ID of the group
-    pub group_id: u32,
-    /// Run the container as a non-root user?
-    pub non_root: bool,
 }
 
 impl<'a> BuildSpec<'a> {
@@ -84,22 +78,6 @@ impl<'a> BuildSpec<'a> {
         default_channel: &'a str,
         default_url: &'a str,
     ) -> Self {
-
-        let user_id = match m.value_of("USER_ID") {
-            Some(i) => {
-                // unwrap OK because validation function ensures it
-                i.parse::<u32>().unwrap()
-            }
-            None => DEFAULT_USER_AND_GROUP_ID,
-        };
-        let group_id = match m.value_of("GROUP_ID") {
-            Some(i) => {
-                // unwrap OK because validation function ensures it
-                i.parse::<u32>().unwrap()
-            }
-            None => user_id,
-        };
-
         BuildSpec {
             hab: m.value_of("HAB_PKG").unwrap_or(DEFAULT_HAB_IDENT),
             hab_launcher: m.value_of("HAB_LAUNCHER_PKG").unwrap_or(
@@ -113,9 +91,6 @@ impl<'a> BuildSpec<'a> {
             idents_or_archives: m.values_of("PKG_IDENT_OR_ARTIFACT")
                 .expect("No package specified")
                 .collect(),
-            user_id: user_id,
-            group_id: group_id,
-            non_root: m.is_present("NON_ROOT"),
         }
     }
 
@@ -404,13 +379,6 @@ pub struct BuildRootContext {
     channel: String,
     /// The path to the root of the file system.
     rootfs: PathBuf,
-    /// The user ID of the primary service user
-    user_id: u32,
-    /// The group ID of the primary service group
-    group_id: u32,
-    /// Whether or not the container should be tailored to run Habitat
-    /// as a non-root user
-    non_root: bool,
 
     /// A string representation of a Habitat Package Identifer for the Habitat CLI package.
     pub hab: String,
@@ -461,9 +429,6 @@ impl BuildRootContext {
             env_path: bin_path.to_string_lossy().into_owned(),
             channel: spec.channel.into(),
             rootfs: rootfs,
-            user_id: spec.user_id,
-            group_id: spec.group_id,
-            non_root: spec.non_root,
             hab: spec.hab.to_string(),
         };
         context.validate()?;
@@ -522,8 +487,8 @@ impl BuildRootContext {
     pub fn svc_users_and_groups(&self) -> Result<(Vec<EtcPasswdEntry>, Vec<EtcGroupEntry>)> {
         let mut users = Vec::new();
         let mut groups = Vec::new();
-        let uid = self.user_id;
-        let gid = self.group_id;
+        let uid = DEFAULT_USER_AND_GROUP_ID;
+        let gid = DEFAULT_USER_AND_GROUP_ID;
 
         let pkg = self.primary_svc()?;
         let user_name = pkg.svc_user().unwrap_or(Some(String::from("hab"))).unwrap();
@@ -679,14 +644,6 @@ impl BuildRootContext {
     /// Returns the root file system which is used to export an image.
     pub fn rootfs(&self) -> &Path {
         self.rootfs.as_ref()
-    }
-
-    pub fn primary_user_id(&self) -> u32 {
-        if self.non_root { self.user_id } else { 0 }
-    }
-
-    pub fn primary_group_id(&self) -> u32 {
-        if self.non_root { self.group_id } else { 0 }
     }
 
     fn validate(&self) -> Result<()> {

@@ -2,11 +2,14 @@ FROM scratch
 ENV PATH {{path}}
 ADD {{rootfs}} /
 
-# TODO (CM): Address this environment variable once and for all
-# ENV HAB_NON_ROOT=1
-
 RUN chmod -R g=u /hab
+
+# This is to support installing packages (and thus, updates) as a
+# non-root Supervisor
+#
+# TODO (CM): Address HAB_NON_ROOT environment variable once and for all
 RUN mkdir -p /home/hab_non_root && chmod -R g=u /home/hab_non_root
+ENV HOME=/home/hab_non_root HAB_NON_ROOT=1
 
 EXPOSE 9631 {{exposes}}
 ENTRYPOINT ["/init.sh"]

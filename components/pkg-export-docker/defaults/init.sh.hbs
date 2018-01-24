@@ -1,27 +1,5 @@
 #!{{busybox_shell}}
 
-# This delightful hack ensures that an entry exists in /etc/passwd for
-# a user if the container is run with a `--user` flag that does not
-# match an existing /etc/passwd entry (as happens by default on
-# platforms like OpenShift; this approach is actually taken directly
-# from OpenShift's recommended practices).
-#
-# This is needed as long as Habitat needs to resolve the username of
-# the user it's running as.
-#
-# (It also requires /etc/passwd to be writable by the user, which is
-# currently done by making it writable by the root group, which will
-# be the default when using `--user` with large, random IDs, as is
-# done in OpenShift. Setting the group ID, on the other hand, will
-# violate this assumption, and will result in the user being
-# anonymous.)
-#
-if ! whoami &> /dev/null; then
-  if [ -w /etc/passwd ]; then
-    echo "${USER_NAME:-hab_non_root}:x:$(id -u):0:${USER_NAME:-hab_non_root} user:/home/hab_non_root:/sbin/nologin" >> /etc/passwd
-  fi
-fi
-
 export PATH="{{path}}"
 case "$1" in
   -h|--help|help|-V|--version) exec {{sup_bin}} "$@";;

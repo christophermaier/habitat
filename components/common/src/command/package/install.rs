@@ -191,16 +191,6 @@ where
     P1: AsRef<Path>,
     P2: AsRef<Path>,
 {
-    if env::var_os("HAB_NON_ROOT").is_none() && !am_i_root() {
-        ui.warn(
-            "Installing a package requires root or administrator privileges. Please retry \
-                   this command as a super user or use a privilege-granting facility such as \
-                   sudo.",
-        )?;
-        ui.br()?;
-        return Err(Error::RootRequired);
-    }
-
     // TODO (CM): rename fs::cache_key_path so the naming is
     // consistent and flows better.
     let key_cache_path = cache_key_path(Some(fs_root_path.as_ref()));

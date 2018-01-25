@@ -60,10 +60,6 @@ pub fn get_home_for_current_user() -> Option<PathBuf> {
     }
 }
 
-pub fn get_primary_gid_for_user(username: &str) -> Option<u32> {
-    linux_users::get_user_by_name(username).map(|u| u.primary_group_id())
-}
-
 pub fn root_level_account() -> String {
     "root".to_string()
 }

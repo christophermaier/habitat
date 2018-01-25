@@ -75,10 +75,6 @@ pub fn get_home_for_current_user() -> Option<PathBuf> {
     Some(buff)
 }
 
-pub fn get_primary_gid_for_user(username: &str) -> Option<String> {
-    None
-}
-
 pub fn root_level_account() -> String {
     env::var("COMPUTERNAME").unwrap().to_uppercase() + "$"
 }

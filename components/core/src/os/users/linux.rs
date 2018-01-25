@@ -53,13 +53,6 @@ pub fn get_home_for_user(username: &str) -> Option<PathBuf> {
     linux_users::get_user_by_name(username).map(|u| PathBuf::from(u.home_dir()))
 }
 
-pub fn get_home_for_current_user() -> Option<PathBuf> {
-    match get_current_username() {
-        Some(user) => linux_users::get_user_by_name(&user).map(|u| PathBuf::from(u.home_dir())),
-        None => None,
-    }
-}
-
 pub fn root_level_account() -> String {
     "root".to_string()
 }

@@ -2,8 +2,6 @@ FROM scratch
 ENV PATH {{path}}
 ADD {{rootfs}} /
 
-RUN chmod -R g=u /hab
-
 # This is to support installing packages (and thus, updates) as a
 # non-root Supervisor
 RUN mkdir -p /home/hab_non_root && chmod -R g=u /home/hab_non_root

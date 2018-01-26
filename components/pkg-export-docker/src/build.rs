@@ -33,6 +33,8 @@ use tempdir::TempDir;
 
 use super::{VERSION, BUSYBOX_IDENT, CACERTS_IDENT};
 use accounts::{EtcPasswdEntry, EtcGroupEntry};
+#[cfg(unix)]
+use chmod;
 use error::{Error, Result};
 use rootfs;
 use util;
@@ -128,6 +130,7 @@ impl<'a> BuildSpec<'a> {
         let base_pkgs = self.install_base_pkgs(ui, &rootfs)?;
         let user_pkgs = self.install_user_pkgs(ui, &rootfs)?;
         if cfg!(target_os = "linux") {
+            self.chmod_hab_directory(ui, &rootfs)?;
             self.link_binaries(ui, &rootfs, &base_pkgs)?;
             self.link_cacerts(ui, &rootfs, &base_pkgs)?;
             self.link_user_pkgs(ui, &rootfs, &user_pkgs)?;
@@ -258,6 +261,31 @@ impl<'a> BuildSpec<'a> {
         symlink(src, dst)?;
 
         Ok(())
+    }
+
+    /// Perform a recursive `chmod` on the `/hab` directory inside the
+    /// rootfs (assumes that directory has been created and populated
+    /// already).
+    ///
+    /// We need the contents of `/hab` to be writable by the group as
+    /// well as the user; in the container, this translates to the
+    /// root group, and is essential for non-root supervisors to be
+    /// able to run (see OpenShift).
+    ///
+    /// By setting the permissions outside of the Dockerfile, we
+    /// prevent doubling the size of the final image, since
+    /// (currently) there's no way to get files into a Docker
+    /// container and change the permissions in a single layer.
+    fn chmod_hab_directory<P>(&self, ui: &mut UI, rootfs: P) -> Result<()>
+    where
+        P: AsRef<Path>,
+    {
+        let target = rootfs.as_ref().join("hab");
+        ui.status(
+            Status::Custom('✓', "Changing permissions on".into()),
+            format!("{:?}", target),
+        )?;
+        chmod::recursive_g_equal_u(target)
     }
 
     fn remove_symlink_to_artifact_cache<P: AsRef<Path>>(

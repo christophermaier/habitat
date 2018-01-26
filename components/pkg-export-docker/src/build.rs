@@ -734,9 +734,6 @@ mod test {
             base_pkgs_url: "base_pkgs_url",
             base_pkgs_channel: "base_pkgs_channel",
             idents_or_archives: Vec::new(),
-            user_id: 42,
-            group_id: 2112,
-            non_root: false,
         }
     }
 
@@ -839,55 +836,6 @@ mod test {
 
         use super::super::*;
         use super::*;
-
-        #[test]
-        fn without_arg_user_and_group_ids_are_the_default_and_identical() {
-            let matches = arg_matches(vec![&*hcore::PROGRAM_NAME, "testing/foo"]);
-            let build_spec =
-                BuildSpec::new_from_cli_matches(&matches, "stable", "https://bldr.habitat.sh");
-
-            assert_eq!(build_spec.user_id, DEFAULT_USER_AND_GROUP_ID);
-            assert_eq!(build_spec.group_id, DEFAULT_USER_AND_GROUP_ID);
-        }
-
-        #[test]
-        fn user_id_option_sets_user_and_group_ids_to_the_same_value() {
-            let matches = arg_matches(vec![&*hcore::PROGRAM_NAME, "testing/foo", "--user-id=2112"]);
-            let build_spec =
-                BuildSpec::new_from_cli_matches(&matches, "stable", "https://bldr.habitat.sh");
-
-            assert_eq!(build_spec.user_id, 2112);
-            assert_eq!(build_spec.group_id, 2112);
-        }
-
-        #[test]
-        fn setting_only_group_id_leaves_user_id_as_default() {
-            let matches = arg_matches(vec![
-                &*hcore::PROGRAM_NAME,
-                "testing/foo",
-                "--group-id=9999",
-            ]);
-            let build_spec =
-                BuildSpec::new_from_cli_matches(&matches, "stable", "https://bldr.habitat.sh");
-
-            assert_eq!(build_spec.user_id, DEFAULT_USER_AND_GROUP_ID);
-            assert_eq!(build_spec.group_id, 9999);
-        }
-
-        #[test]
-        fn user_and_group_id_can_be_set_independently() {
-            let matches = arg_matches(vec![
-                &*hcore::PROGRAM_NAME,
-                "testing/foo",
-                "--user-id=5000",
-                "--group-id=9000",
-            ]);
-            let build_spec =
-                BuildSpec::new_from_cli_matches(&matches, "stable", "https://bldr.habitat.sh");
-
-            assert_eq!(build_spec.user_id, 5000);
-            assert_eq!(build_spec.group_id, 9000);
-        }
 
         #[test]
         fn artifact_cache_symlink() {

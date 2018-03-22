@@ -510,8 +510,7 @@ fn toml_merge_recurse(
 ) -> Result<()> {
     if depth > TOML_MAX_MERGE_DEPTH {
         return Err(sup_error!(Error::TomlMergeError(format!(
-            "Max recursive merge depth of {} \
-                                                             exceeded.",
+            "Max recursive merge depth of {} exceeded.",
             TOML_MAX_MERGE_DEPTH
         ))));
     }
@@ -522,8 +521,7 @@ fn toml_merge_recurse(
                 toml::Value::Table(ref mut t) => t,
                 _ => {
                     return Err(sup_error!(Error::TomlMergeError(format!(
-                        "Value at key {} \
-                                                                         should be a Table",
+                        "Value at key {} should be a Table",
                         &key
                     ))));
                 }

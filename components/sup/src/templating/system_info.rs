@@ -36,8 +36,14 @@ pub struct SystemInfo {
     pub http_gateway_ip: IpAddr,
     pub http_gateway_port: u16,
 
-    // Should really be "persistent" instead
+    /// Whether or not the Supervisor was started as a persistent
+    /// peer.
+    ///
+    /// DEPRECATED: Use `persistent` instead.
     pub permanent: bool,
+
+    /// Whether or not the Supervisor was started as a persistent peer
+    pub persistent: bool,
 }
 
 impl SystemInfo {
@@ -52,6 +58,8 @@ impl SystemInfo {
             http_gateway_ip: sys.http_gateway_ip.clone(),
             http_gateway_port: sys.http_gateway_port,
             permanent: sys.permanent,
+
+            persistent: sys.permanent,
         }
     }
 }

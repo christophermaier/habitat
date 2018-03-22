@@ -14,6 +14,7 @@
 
 pub mod helpers;
 mod context;
+mod system_info;
 
 use std::fmt;
 use std::ops::{Deref, DerefMut};

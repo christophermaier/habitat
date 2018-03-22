@@ -20,6 +20,8 @@ use census::{CensusGroup, CensusMember, CensusRing, ElectionStatus};
 use manager::Sys;
 use manager::service::{Cfg, Pkg, ServiceBind};
 
+use templating::system_info::SystemInfo;
+
 #[derive(Clone, Debug, Serialize)]
 pub struct Binds<'a>(HashMap<String, BindGroup<'a>>);
 
@@ -72,7 +74,8 @@ impl<'a> BindGroup<'a> {
 /// as required.
 #[derive(Clone, Debug, Serialize)]
 pub struct RenderContext<'a> {
-    pub sys: &'a Sys,
+    #[serde(rename = "sys")]
+    pub system_info: SystemInfo,
     pub pkg: &'a Pkg,
     pub cfg: &'a Cfg,
     pub svc: Svc<'a>,
@@ -82,7 +85,7 @@ pub struct RenderContext<'a> {
 impl<'a> RenderContext<'a> {
     pub fn new<T>(
         service_group: &ServiceGroup,
-        sys: &'a Sys,
+        sys: &Sys,
         pkg: &'a Pkg,
         cfg: &'a Cfg,
         census: &'a CensusRing,
@@ -95,7 +98,7 @@ impl<'a> RenderContext<'a> {
             "Census Group missing from list!",
         );
         RenderContext {
-            sys: sys,
+            system_info: SystemInfo::from_sys(sys),
             pkg: pkg,
             cfg: cfg,
             svc: Svc::new(census_group),

@@ -21,6 +21,7 @@ use manager::Sys;
 use manager::service::{Cfg, Pkg, ServiceBind};
 
 use templating::system_info::SystemInfo;
+use templating::package::Package;
 
 #[derive(Clone, Debug, Serialize)]
 pub struct Binds<'a>(HashMap<String, BindGroup<'a>>);
@@ -76,7 +77,8 @@ impl<'a> BindGroup<'a> {
 pub struct RenderContext<'a> {
     #[serde(rename = "sys")]
     pub system_info: SystemInfo,
-    pub pkg: &'a Pkg,
+    #[serde(rename = "pkg")]
+    pub package: Package,
     pub cfg: &'a Cfg,
     pub svc: Svc<'a>,
     pub bind: Binds<'a>,
@@ -86,7 +88,7 @@ impl<'a> RenderContext<'a> {
     pub fn new<T>(
         service_group: &ServiceGroup,
         sys: &Sys,
-        pkg: &'a Pkg,
+        pkg: &Pkg,
         cfg: &'a Cfg,
         census: &'a CensusRing,
         bindings: T,
@@ -99,7 +101,7 @@ impl<'a> RenderContext<'a> {
         );
         RenderContext {
             system_info: SystemInfo::from_sys(sys),
-            pkg: pkg,
+            package: Package::from_pkg(pkg),
             cfg: cfg,
             svc: Svc::new(census_group),
             bind: Binds::new(bindings, census),

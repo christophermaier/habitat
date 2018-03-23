@@ -120,20 +120,20 @@ impl<'a> RenderContext<'a> {
 
 #[derive(Clone, Debug)]
 struct Svc<'a> {
-    pub service: &'a str,
-    pub group: &'a str,
-    pub org: Option<&'a str>,
-    pub election_is_running: bool,
-    pub election_is_no_quorum: bool,
-    pub election_is_finished: bool,
-    pub update_election_is_running: bool,
-    pub update_election_is_no_quorum: bool,
-    pub update_election_is_finished: bool,
-    pub me: SvcMember<'a>,
-    pub first: SvcMember<'a>,
-    pub members: Vec<SvcMember<'a>>,
-    pub leader: Option<SvcMember<'a>>,
-    pub update_leader: Option<SvcMember<'a>>,
+    service: &'a str,
+    group: &'a str,
+    org: Option<&'a str>,
+    election_is_running: bool,
+    election_is_no_quorum: bool,
+    election_is_finished: bool,
+    update_election_is_running: bool,
+    update_election_is_no_quorum: bool,
+    update_election_is_finished: bool,
+    me: SvcMember<'a>,
+    first: SvcMember<'a>,
+    members: Vec<SvcMember<'a>>,
+    leader: Option<SvcMember<'a>>,
+    update_leader: Option<SvcMember<'a>>,
 }
 
 impl<'a> Svc<'a> {

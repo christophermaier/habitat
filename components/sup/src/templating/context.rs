@@ -124,9 +124,6 @@ struct Svc<'a> {
 
     group: &'a str,
 
-    update_election_is_running: bool,
-    update_election_is_no_quorum: bool,
-    update_election_is_finished: bool,
     me: SvcMember<'a>,
     first: SvcMember<'a>,
     members: Vec<SvcMember<'a>>,
@@ -140,12 +137,6 @@ impl<'a> Svc<'a> {
             census_group: census_group,
             group: census_group.service_group.group(),
 
-            update_election_is_running: census_group.election_status ==
-                ElectionStatus::ElectionInProgress,
-            update_election_is_no_quorum: census_group.election_status ==
-                ElectionStatus::ElectionNoQuorum,
-            update_election_is_finished: census_group.election_status ==
-                ElectionStatus::ElectionFinished,
             me: SvcMember(census_group.me().expect("Missing 'me'")),
             members: census_group
                 .members()
@@ -173,9 +164,9 @@ impl<'a> Serialize for Svc<'a> {
         map.serialize_entry("election_is_running", &(self.census_group.election_status == ElectionStatus::ElectionInProgress))?;
         map.serialize_entry("election_is_no_quorum", &(self.census_group.election_status == ElectionStatus::ElectionNoQuorum))?;
         map.serialize_entry("election_is_finished", &(self.census_group.election_status == ElectionStatus::ElectionFinished))?;
-        map.serialize_entry("update_election_is_running", &self.update_election_is_running)?;
-        map.serialize_entry("update_election_is_no_quorum", &self.update_election_is_no_quorum)?;
-        map.serialize_entry("update_election_is_finished", &self.update_election_is_finished)?;
+        map.serialize_entry("update_election_is_running",  &(self.census_group.update_election_status == ElectionStatus::ElectionInProgress))?;
+        map.serialize_entry("update_election_is_no_quorum", &(self.census_group.update_election_status == ElectionStatus::ElectionNoQuorum))?;
+        map.serialize_entry("update_election_is_finished", &(self.census_group.update_election_status == ElectionStatus::ElectionFinished))?;
 
         map.serialize_entry("me", &self.me)?;
         map.serialize_entry("members", &self.members)?;

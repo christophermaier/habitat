@@ -374,6 +374,7 @@ impl CensusGroup {
             let member = self.population
                 .entry(member_id.to_string())
                 .or_insert_with(|| {
+                    // Note: this is where CensusMembers are created
                     let mut new_member = CensusMember::default();
                     new_member.alive = is_self;
                     new_member
@@ -588,6 +589,15 @@ impl CensusMember {
     /// Is this member currently considered to be alive or not?
     pub fn alive(&self) -> bool {
         self.alive
+    }
+    pub fn suspect(&self) -> bool {
+        self.suspect
+    }
+    pub fn confirmed(&self) -> bool {
+        self.confirmed
+    }
+    pub fn departed(&self) -> bool {
+        self.departed
     }
 }
 

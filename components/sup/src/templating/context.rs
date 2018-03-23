@@ -171,15 +171,76 @@ impl<'a> Serialize for Svc<'a> {
     }
 }
 
-// NOTE: This is exposed to users in templates. Any public member is
-// accessible to users, so change this interface with care.
-//
-// User-facing documentation is available at
-// https://www.habitat.sh/docs/reference/#template-data; update that
-// as required.
-/// A friendly representation of a `CensusMember` to the templating system.
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug)]
 pub struct SvcMember<'a>(&'a CensusMember);
+
+impl<'a> Serialize for SvcMember<'a> {
+    fn serialize<S>(&self, serializer: S) -> result::Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut map = serializer.serialize_map(Some(24))?;
+
+        map.serialize_entry("member_id", &self.0.member_id)?;
+
+        // NOTE (CM): pkg is actually optional on CensusMember
+
+        // TODO (CM): pkg is currently serialized as a map with
+        // origin, name, version, and release keys. We should also add
+        // another field (e.g. "pkg_ident"?) that exposes a single
+        // string.
+        //
+        // We should also normalize this pattern across our templating data.
+
+        // TODO (CM): assuming these are all meant to be Some and
+        // fully-qualified once we get to this point, right?
+        map.serialize_entry("pkg", &self.0.pkg)?;
+
+        // TODO (CM): add entry for entire service_group name in a
+        // single string
+        map.serialize_entry("service", &self.0.service)?;
+        map.serialize_entry("group", &self.0.group)?;
+        map.serialize_entry("application", &self.0.application)?;
+        map.serialize_entry("environment", &self.0.environment)?;
+        map.serialize_entry("org", &self.0.org)?;
+
+        // TODO (CM): we actually spell it correctly here... it's not "permanent"
+        // TODO (CM): add an "is_persistent" field to make it clear it's a boolean
+        map.serialize_entry("persistent", &self.0.persistent)?;
+        // TODO (CM): add an "is_leader" field to make it clear it's a boolean
+        map.serialize_entry("leader", &self.0.leader)?;
+        // TODO (CM): is_follower
+        map.serialize_entry("follower", &self.0.follower)?;
+        // TODO (CM): is_update_leader
+        map.serialize_entry("update_leader", &self.0.update_leader)?;
+        // TODO (CM): is_update_follower
+        map.serialize_entry("update_follower", &self.0.update_follower)?;
+
+        map.serialize_entry("election_is_running", &self.0.election_is_running)?;
+        map.serialize_entry("election_is_no_quorum", &self.0.election_is_no_quorum)?;
+        map.serialize_entry("election_is_finished", &self.0.election_is_finished)?;
+        map.serialize_entry("update_election_is_running",  &self.0.update_election_is_running)?;
+        map.serialize_entry("update_election_is_no_quorum", &self.0.update_election_is_no_quorum)?;
+        map.serialize_entry("update_election_is_finished", &self.0.update_election_is_finished)?;
+
+        // TODO (CM): this is a SysInfo, not a Sys or
+        // SystemInfo... ugh; NORMALIZE IT ALL
+        map.serialize_entry("sys", &self.0.sys)?;
+
+        // TODO (CM): ugh, these aren't public on
+        // CensusMember... actually, why are they private, and nothing
+        // else is?
+        map.serialize_entry("alive", &self.0.alive())?;
+        map.serialize_entry("suspect", &self.0.suspect())?;
+        map.serialize_entry("confirmed", &self.0.confirmed())?;
+        map.serialize_entry("departed", &self.0.departed())?;
+
+        map.serialize_entry("cfg", &self.0.cfg)?;
+
+        map.end()
+    }
+}
+
 
 /// Helper for pulling the leader or first member from a census group. This is used to populate the
 /// `.first` field in `bind` and `svc`.

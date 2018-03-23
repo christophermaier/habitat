@@ -122,7 +122,7 @@ impl<'a> RenderContext<'a> {
 #[derive(Clone, Debug)]
 struct Svc<'a> {
     census_group: &'a CensusGroup,
-
+    // TODO (CM): Only keeping this for group_name function above
     group: &'a str,
 
     first: SvcMember<'a>,

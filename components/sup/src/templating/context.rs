@@ -13,6 +13,10 @@
 // limitations under the License.
 
 use std::collections::HashMap;
+use std::result;
+
+use serde::{Serialize, Serializer};
+use serde::ser::SerializeMap;
 
 use hcore::service::ServiceGroup;
 
@@ -114,7 +118,7 @@ impl<'a> RenderContext<'a> {
     }
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug)]
 struct Svc<'a> {
     pub service: &'a str,
     pub group: &'a str,
@@ -160,6 +164,33 @@ impl<'a> Svc<'a> {
     }
 }
 
+impl<'a> Serialize for Svc<'a> {
+    fn serialize<S>(&self, serializer: S) -> result::Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut map = serializer.serialize_map(Some(14))?;
+
+        map.serialize_entry("service", &self.service)?;
+        map.serialize_entry("group", &self.group)?;
+        map.serialize_entry("org", &self.org)?;
+
+        map.serialize_entry("election_is_running", &self.election_is_running)?;
+        map.serialize_entry("election_is_no_quorum", &self.election_is_no_quorum)?;
+        map.serialize_entry("election_is_finished", &self.election_is_finished)?;
+        map.serialize_entry("update_election_is_running", &self.update_election_is_running)?;
+        map.serialize_entry("update_election_is_no_quorum", &self.update_election_is_no_quorum)?;
+        map.serialize_entry("update_election_is_finished", &self.update_election_is_finished)?;
+
+        map.serialize_entry("me", &self.me)?;
+        map.serialize_entry("members", &self.members)?;
+        map.serialize_entry("leader", &self.leader)?;
+        map.serialize_entry("first", &self.first)?;
+        map.serialize_entry("update_leader", &self.update_leader)?;
+
+        map.end()
+    }
+}
 
 // NOTE: This is exposed to users in templates. Any public member is
 // accessible to users, so change this interface with care.

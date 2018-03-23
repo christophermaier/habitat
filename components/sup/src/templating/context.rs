@@ -124,7 +124,7 @@ struct Svc<'a> {
     census_group: &'a CensusGroup,
     // TODO (CM): Only keeping this for group_name function above
     group: &'a str,
-
+    // TODO (CM): this will need to be optional soon
     first: SvcMember<'a>,
 }
 

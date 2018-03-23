@@ -78,7 +78,7 @@ pub struct RenderContext<'a> {
     #[serde(rename = "sys")]
     pub system_info: SystemInfo,
     #[serde(rename = "pkg")]
-    pub package: Package,
+    pub package: Package<'a>,
     pub cfg: &'a Cfg,
     pub svc: Svc<'a>,
     pub bind: Binds<'a>,
@@ -88,7 +88,7 @@ impl<'a> RenderContext<'a> {
     pub fn new<T>(
         service_group: &ServiceGroup,
         sys: &Sys,
-        pkg: &Pkg,
+        pkg: &'a Pkg,
         cfg: &'a Cfg,
         census: &'a CensusRing,
         bindings: T,

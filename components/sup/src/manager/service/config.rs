@@ -454,7 +454,7 @@ impl CfgRenderer {
                     "Configuration {} does not exist; restarting",
                     cfg_dest.display()
                 );
-                outputln!(preamble ctx.svc.group, "Updated {} {}",
+                outputln!(preamble ctx.group_name(), "Updated {} {}",
                           template.as_str(),
                           compiled_hash);
                 let mut config_file = File::create(&cfg_dest)?;
@@ -479,7 +479,7 @@ impl CfgRenderer {
                         "Configuration {} has changed; restarting",
                         cfg_dest.display()
                     );
-                    outputln!(preamble ctx.svc.group,"Updated {} {}",
+                    outputln!(preamble ctx.group_name(),"Updated {} {}",
                               template.as_str(),
                               compiled_hash);
                     let mut config_file = File::create(&cfg_dest)?;

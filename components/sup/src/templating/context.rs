@@ -80,7 +80,7 @@ pub struct RenderContext<'a> {
     #[serde(rename = "pkg")]
     pub package: Package<'a>,
     pub cfg: &'a Cfg,
-    pub svc: Svc<'a>,
+    svc: Svc<'a>,
     pub bind: Binds<'a>,
 }
 
@@ -107,10 +107,15 @@ impl<'a> RenderContext<'a> {
             bind: Binds::new(bindings, census),
         }
     }
+
+    // Exposed only for logging... can probably do this another way
+    pub fn group_name(&self) -> &str {
+        self.svc.group
+    }
 }
 
 #[derive(Clone, Debug, Serialize)]
-pub struct Svc<'a> {
+struct Svc<'a> {
     pub service: &'a str,
     pub group: &'a str,
     pub org: Option<&'a str>,

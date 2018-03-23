@@ -122,7 +122,6 @@ impl<'a> RenderContext<'a> {
 struct Svc<'a> {
     census_group: &'a CensusGroup,
 
-    group: &'a str,
     org: Option<&'a str>,
     election_is_running: bool,
     election_is_no_quorum: bool,
@@ -142,7 +141,6 @@ impl<'a> Svc<'a> {
         Svc {
             census_group: census_group,
 
-            group: census_group.service_group.group(),
             org: census_group.service_group.org(),
             election_is_running: census_group.election_status == ElectionStatus::ElectionInProgress,
             election_is_no_quorum: census_group.election_status == ElectionStatus::ElectionNoQuorum,
@@ -174,7 +172,7 @@ impl<'a> Serialize for Svc<'a> {
         let mut map = serializer.serialize_map(Some(14))?;
 
         map.serialize_entry("service", &self.census_group.service_group.service())?;
-        map.serialize_entry("group", &self.group)?;
+        map.serialize_entry("group", &self.census_group.service_group.group())?;
         map.serialize_entry("org", &self.org)?;
 
         map.serialize_entry("election_is_running", &self.election_is_running)?;

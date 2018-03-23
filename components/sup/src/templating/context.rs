@@ -122,6 +122,8 @@ impl<'a> RenderContext<'a> {
 struct Svc<'a> {
     census_group: &'a CensusGroup,
 
+    group: &'a str,
+
     election_is_no_quorum: bool,
     election_is_finished: bool,
     update_election_is_running: bool,
@@ -138,7 +140,7 @@ impl<'a> Svc<'a> {
     fn new(census_group: &'a CensusGroup) -> Self {
         Svc {
             census_group: census_group,
-
+            group: census_group.service_group.group(),
             election_is_no_quorum: census_group.election_status == ElectionStatus::ElectionNoQuorum,
             election_is_finished: census_group.election_status == ElectionStatus::ElectionFinished,
             update_election_is_running: census_group.election_status ==

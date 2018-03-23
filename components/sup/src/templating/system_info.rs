@@ -14,7 +14,6 @@
 
 //! Contents found under the "sys" key of the rendering context.
 
-use std::net::IpAddr;
 use std::result;
 
 use serde::{Serialize, Serializer};
@@ -27,55 +26,37 @@ use manager::Sys;
 // and consider exposing it under a "sup" key
 
 #[derive(Clone, Debug)]
-pub struct SystemInfo {
-    pub version: String,
-    pub member_id: String,
-    pub ip: IpAddr,
-    pub hostname: String,
-    pub gossip_ip: IpAddr,
-    pub gossip_port: u16,
-    pub http_gateway_ip: IpAddr,
-    pub http_gateway_port: u16,
-    /// Whether or not the Supervisor was started as a persistent peer
-    pub persistent: bool,
+pub struct SystemInfo<'a> {
+    sys: &'a Sys
 }
 
-impl SystemInfo {
-    pub fn from_sys(sys: &Sys) -> Self {
-        SystemInfo{
-            version: sys.version.clone(),
-            member_id: sys.member_id.clone(),
-            ip: sys.ip.clone(),
-            hostname: sys.hostname.clone(),
-            gossip_ip: sys.gossip_ip.clone(),
-            gossip_port: sys.gossip_port,
-            http_gateway_ip: sys.http_gateway_ip.clone(),
-            http_gateway_port: sys.http_gateway_port,
-            persistent: sys.permanent,
-        }
+impl<'a> SystemInfo<'a> {
+    pub fn from_sys(sys: &'a Sys) -> Self {
+        SystemInfo{ sys }
     }
 }
 
-impl Serialize for SystemInfo {
+impl<'a> Serialize for SystemInfo<'a> {
     fn serialize<S>(&self, serializer: S) -> result::Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
         let mut map = serializer.serialize_map(Some(10))?;
 
-        map.serialize_entry("version", &self.version)?;
-        map.serialize_entry("member_id", &self.member_id)?;
-        map.serialize_entry("ip", &self.ip)?;
-        map.serialize_entry("hostname", &self.hostname)?;
-        map.serialize_entry("gossip_ip", &self.gossip_ip)?;
-        map.serialize_entry("gossip_port", &self.gossip_port)?;
-        map.serialize_entry("http_gateway_ip", &self.http_gateway_ip)?;
-        map.serialize_entry("http_gateway_port", &self.http_gateway_port)?;
+        map.serialize_entry("version", &self.sys.version)?;
+        map.serialize_entry("member_id", &self.sys.member_id)?;
+        map.serialize_entry("ip", &self.sys.ip)?;
+        map.serialize_entry("hostname", &self.sys.hostname)?;
+        map.serialize_entry("gossip_ip", &self.sys.gossip_ip)?;
+        map.serialize_entry("gossip_port", &self.sys.gossip_port)?;
+        map.serialize_entry("http_gateway_ip", &self.sys.http_gateway_ip)?;
+        map.serialize_entry("http_gateway_port", &self.sys.http_gateway_port)?;
 
         // This key is to support the old legacy behavior
-        map.serialize_entry("permanent", &self.persistent)?;
+        map.serialize_entry("permanent", &self.sys.permanent)?;
+
         // This is what `permanent` should have been from the beginning
-        map.serialize_entry("persistent", &self.persistent)?;
+        map.serialize_entry("persistent", &self.sys.permanent)?;
 
         map.end()
     }

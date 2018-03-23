@@ -76,7 +76,7 @@ impl<'a> BindGroup<'a> {
 #[derive(Clone, Debug, Serialize)]
 pub struct RenderContext<'a> {
     #[serde(rename = "sys")]
-    pub system_info: SystemInfo,
+    pub system_info: SystemInfo<'a>,
     #[serde(rename = "pkg")]
     pub package: Package<'a>,
     pub cfg: &'a Cfg,
@@ -87,7 +87,7 @@ pub struct RenderContext<'a> {
 impl<'a> RenderContext<'a> {
     pub fn new<T>(
         service_group: &ServiceGroup,
-        sys: &Sys,
+        sys: &'a Sys,
         pkg: &'a Pkg,
         cfg: &'a Cfg,
         census: &'a CensusRing,

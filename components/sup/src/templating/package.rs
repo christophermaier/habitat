@@ -14,18 +14,17 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::result;
 
-use hcore::package::PackageIdent;
+use serde::{Serialize, Serializer};
+use serde::ser::SerializeMap;
+
+use hcore::package::{Identifiable, PackageIdent};
 use manager::service::{Env, Pkg};
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug)]
 pub struct Package {
-    pub ident: String,
-
-    pub origin: String,
-    pub name: String,
-    pub version: String,
-    pub release: String,
+    pub ident: PackageIdent,
 
     // TODO (CM): makes no sense
     pub deps: Vec<PackageIdent>,
@@ -53,11 +52,7 @@ pub struct Package {
 impl Package {
     pub fn from_pkg(pkg: &Pkg) -> Self {
         Package {
-            ident: pkg.ident.to_string(),
-            origin: pkg.origin.clone(),
-            name: pkg.name.clone(),
-            version: pkg.version.clone(),
-            release: pkg.release.clone(),
+            ident: pkg.ident.clone(),
 
             // NOTE: These are transitive deps
             deps: pkg.deps.clone(),
@@ -78,5 +73,43 @@ impl Package {
             svc_user: pkg.svc_user.clone(),
             svc_group: pkg.svc_group.clone(),
         }
+    }
+}
+
+impl Serialize for Package {
+    fn serialize<S>(&self, serializer: S) -> result::Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut map = serializer.serialize_map(Some(20))?;
+
+        map.serialize_entry("ident", &self.ident.to_string())?;
+
+        // Break out the components of the identifier, for easy access
+        // in templates
+        map.serialize_entry("origin", &self.ident.origin())?;
+        map.serialize_entry("name", &self.ident.name())?;
+        map.serialize_entry("version", &self.ident.version().expect("ident should always have a version here"))?;
+        map.serialize_entry("release", &self.ident.release().expect("ident shouls always have a release here"))?;
+
+        map.serialize_entry("deps", &self.deps)?;
+        map.serialize_entry("env", &self.env)?;
+
+        map.serialize_entry("exposes", &self.exposes)?;
+        map.serialize_entry("exports", &self.exports)?;
+        map.serialize_entry("path", &self.path)?;
+
+        map.serialize_entry("svc_path", &self.svc_path)?;
+        map.serialize_entry("svc_config_path", &self.svc_config_path)?;
+        map.serialize_entry("svc_data_path", &self.svc_data_path)?;
+        map.serialize_entry("svc_files_path", &self.svc_files_path)?;
+        map.serialize_entry("svc_static_path", &self.svc_static_path)?;
+        map.serialize_entry("svc_var_path", &self.svc_var_path)?;
+        map.serialize_entry("svc_pid_file", &self.svc_pid_file)?;
+        map.serialize_entry("svc_run", &self.svc_run)?;
+        map.serialize_entry("svc_user", &self.svc_user)?;
+        map.serialize_entry("svc_group", &self.svc_group)?;
+
+        map.end()
     }
 }

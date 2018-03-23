@@ -120,6 +120,8 @@ impl<'a> RenderContext<'a> {
 
 #[derive(Clone, Debug)]
 struct Svc<'a> {
+    census_group: &'a CensusGroup,
+
     service: &'a str,
     group: &'a str,
     org: Option<&'a str>,
@@ -139,6 +141,8 @@ struct Svc<'a> {
 impl<'a> Svc<'a> {
     fn new(census_group: &'a CensusGroup) -> Self {
         Svc {
+            census_group: census_group,
+
             service: census_group.service_group.service(),
             group: census_group.service_group.group(),
             org: census_group.service_group.org(),

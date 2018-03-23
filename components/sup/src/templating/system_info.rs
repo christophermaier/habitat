@@ -15,6 +15,10 @@
 //! Contents found under the "sys" key of the rendering context.
 
 use std::net::IpAddr;
+use std::result;
+
+use serde::{Serialize, Serializer};
+use serde::ser::SerializeMap;
 
 use manager::Sys;
 
@@ -22,26 +26,16 @@ use manager::Sys;
 // it really captures information about how the Supervisor is invoked,
 // and consider exposing it under a "sup" key
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug)]
 pub struct SystemInfo {
     pub version: String,
     pub member_id: String,
-
     pub ip: IpAddr,
     pub hostname: String,
-
     pub gossip_ip: IpAddr,
     pub gossip_port: u16,
-
     pub http_gateway_ip: IpAddr,
     pub http_gateway_port: u16,
-
-    /// Whether or not the Supervisor was started as a persistent
-    /// peer.
-    ///
-    /// DEPRECATED: Use `persistent` instead.
-    pub permanent: bool,
-
     /// Whether or not the Supervisor was started as a persistent peer
     pub persistent: bool,
 }
@@ -57,9 +51,32 @@ impl SystemInfo {
             gossip_port: sys.gossip_port,
             http_gateway_ip: sys.http_gateway_ip.clone(),
             http_gateway_port: sys.http_gateway_port,
-            permanent: sys.permanent,
-
             persistent: sys.permanent,
         }
+    }
+}
+
+impl Serialize for SystemInfo {
+    fn serialize<S>(&self, serializer: S) -> result::Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut map = serializer.serialize_map(Some(10))?;
+
+        map.serialize_entry("version", &self.version)?;
+        map.serialize_entry("member_id", &self.member_id)?;
+        map.serialize_entry("ip", &self.ip)?;
+        map.serialize_entry("hostname", &self.hostname)?;
+        map.serialize_entry("gossip_ip", &self.gossip_ip)?;
+        map.serialize_entry("gossip_port", &self.gossip_port)?;
+        map.serialize_entry("http_gateway_ip", &self.http_gateway_ip)?;
+        map.serialize_entry("http_gateway_port", &self.http_gateway_port)?;
+
+        // This key is to support the old legacy behavior
+        map.serialize_entry("permanent", &self.persistent)?;
+        // This is what `permanent` should have been from the beginning
+        map.serialize_entry("persistent", &self.persistent)?;
+
+        map.end()
     }
 }

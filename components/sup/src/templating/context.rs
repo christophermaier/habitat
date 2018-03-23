@@ -125,7 +125,6 @@ struct Svc<'a> {
     group: &'a str,
 
     first: SvcMember<'a>,
-    members: Vec<SvcMember<'a>>,
     leader: Option<SvcMember<'a>>,
     update_leader: Option<SvcMember<'a>>,
 }
@@ -136,11 +135,6 @@ impl<'a> Svc<'a> {
             census_group: census_group,
             group: census_group.service_group.group(),
 
-            members: census_group
-                .members()
-                .iter()
-                .map(|m| SvcMember(m))
-                .collect(),
             leader: census_group.leader().map(|m| SvcMember(m)),
             first: select_first(census_group).expect("First should always be present on svc"),
             update_leader: census_group.update_leader().map(|m| SvcMember(m)),
@@ -167,7 +161,11 @@ impl<'a> Serialize for Svc<'a> {
         map.serialize_entry("update_election_is_finished", &(self.census_group.update_election_status == ElectionStatus::ElectionFinished))?;
 
         map.serialize_entry("me", &SvcMember(self.census_group.me().expect("Missing 'me'")))?;
-        map.serialize_entry("members", &self.members)?;
+        map.serialize_entry("members", &self.census_group
+                            .members()
+                            .iter()
+                            .map(|m| SvcMember(m))
+                            .collect::<Vec<SvcMember<'a>>>())?;
         map.serialize_entry("leader", &self.leader)?;
         map.serialize_entry("first", &self.first)?;
         map.serialize_entry("update_leader", &self.update_leader)?;

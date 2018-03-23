@@ -117,6 +117,7 @@ impl<'a> RenderContext<'a> {
         self.svc.group
     }
 }
+// TODO (CM): move this to a separate module
 
 #[derive(Clone, Debug)]
 struct Svc<'a> {

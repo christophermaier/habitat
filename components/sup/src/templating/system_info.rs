@@ -26,15 +26,7 @@ use manager::Sys;
 // and consider exposing it under a "sup" key
 
 #[derive(Clone, Debug)]
-pub struct SystemInfo<'a> {
-    sys: &'a Sys
-}
-
-impl<'a> SystemInfo<'a> {
-    pub fn from_sys(sys: &'a Sys) -> Self {
-        SystemInfo{ sys }
-    }
-}
+pub struct SystemInfo<'a>(pub &'a Sys);
 
 impl<'a> Serialize for SystemInfo<'a> {
     fn serialize<S>(&self, serializer: S) -> result::Result<S::Ok, S::Error>
@@ -43,20 +35,20 @@ impl<'a> Serialize for SystemInfo<'a> {
     {
         let mut map = serializer.serialize_map(Some(10))?;
 
-        map.serialize_entry("version", &self.sys.version)?;
-        map.serialize_entry("member_id", &self.sys.member_id)?;
-        map.serialize_entry("ip", &self.sys.ip)?;
-        map.serialize_entry("hostname", &self.sys.hostname)?;
-        map.serialize_entry("gossip_ip", &self.sys.gossip_ip)?;
-        map.serialize_entry("gossip_port", &self.sys.gossip_port)?;
-        map.serialize_entry("http_gateway_ip", &self.sys.http_gateway_ip)?;
-        map.serialize_entry("http_gateway_port", &self.sys.http_gateway_port)?;
+        map.serialize_entry("version", &self.0.version)?;
+        map.serialize_entry("member_id", &self.0.member_id)?;
+        map.serialize_entry("ip", &self.0.ip)?;
+        map.serialize_entry("hostname", &self.0.hostname)?;
+        map.serialize_entry("gossip_ip", &self.0.gossip_ip)?;
+        map.serialize_entry("gossip_port", &self.0.gossip_port)?;
+        map.serialize_entry("http_gateway_ip", &self.0.http_gateway_ip)?;
+        map.serialize_entry("http_gateway_port", &self.0.http_gateway_port)?;
 
         // This key is to support the old legacy behavior
-        map.serialize_entry("permanent", &self.sys.permanent)?;
+        map.serialize_entry("permanent", &self.0.permanent)?;
 
         // This is what `permanent` should have been from the beginning
-        map.serialize_entry("persistent", &self.sys.permanent)?;
+        map.serialize_entry("persistent", &self.0.permanent)?;
 
         map.end()
     }

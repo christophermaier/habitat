@@ -100,7 +100,7 @@ impl<'a> RenderContext<'a> {
             "Census Group missing from list!",
         );
         RenderContext {
-            system_info: SystemInfo::from_sys(sys),
+            system_info: SystemInfo(sys),
             package: Package::from_pkg(pkg),
             cfg: cfg,
             svc: Svc::new(census_group),

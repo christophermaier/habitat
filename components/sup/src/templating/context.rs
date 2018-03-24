@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::result;
 
@@ -114,16 +115,23 @@ impl<'a> RenderContext<'a> {
 
     // Exposed only for logging... can probably do this another way
     pub fn group_name(&self) -> &str {
-        self.svc.group
+        self.svc.service_group.group()
     }
 }
 // TODO (CM): move this to a separate module
 
+
+// effectively a wrapper around a CensusGroup, for templating
 #[derive(Clone, Debug)]
 struct Svc<'a> {
-    census_group: &'a CensusGroup,
-    // TODO (CM): Only keeping this for group_name function above
-    group: &'a str,
+    service_group: Cow<'a, ServiceGroup>,
+    election_status: Cow<'a, ElectionStatus>,
+    update_election_status: Cow<'a, ElectionStatus>,
+    members: Cow<'a, Vec<&'a CensusMember>>,
+    leader: Cow<'a, Option<&'a CensusMember>>,
+    update_leader: Cow<'a, Option<&'a CensusMember>>,
+    me: Cow<'a, CensusMember>,
+
     // TODO (CM): this will need to be optional soon
     first: SvcMember<'a>,
 }
@@ -131,8 +139,13 @@ struct Svc<'a> {
 impl<'a> Svc<'a> {
     fn new(census_group: &'a CensusGroup) -> Self {
         Svc {
-            census_group: census_group,
-            group: census_group.service_group.group(),
+            service_group: Cow::Borrowed(&census_group.service_group),
+            election_status: Cow::Borrowed(&census_group.election_status),
+            update_election_status: Cow::Borrowed(&census_group.update_election_status),
+            members: Cow::Owned(census_group.members()),
+            me: Cow::Borrowed(&census_group.me().expect("Missing 'me'")),
+            leader: Cow::Owned(census_group.leader()),
+            update_leader: Cow::Owned(census_group.update_leader()),
 
             first: select_first(census_group).expect("First should always be present on svc"),
         }
@@ -146,26 +159,27 @@ impl<'a> Serialize for Svc<'a> {
     {
         let mut map = serializer.serialize_map(Some(14))?;
 
-        map.serialize_entry("service", &self.census_group.service_group.service())?;
-        map.serialize_entry("group", &self.census_group.service_group.group())?;
-        map.serialize_entry("org", &self.census_group.service_group.org())?;
+        map.serialize_entry("service", &self.service_group.service())?;
+        map.serialize_entry("group", &self.service_group.group())?;
+        map.serialize_entry("org", &self.service_group.org())?;
+        // TODO (CM): need to add application, environment, and
+        // complete service_group as a string
 
-        map.serialize_entry("election_is_running", &(self.census_group.election_status == ElectionStatus::ElectionInProgress))?;
-        map.serialize_entry("election_is_no_quorum", &(self.census_group.election_status == ElectionStatus::ElectionNoQuorum))?;
-        map.serialize_entry("election_is_finished", &(self.census_group.election_status == ElectionStatus::ElectionFinished))?;
-        map.serialize_entry("update_election_is_running",  &(self.census_group.update_election_status == ElectionStatus::ElectionInProgress))?;
-        map.serialize_entry("update_election_is_no_quorum", &(self.census_group.update_election_status == ElectionStatus::ElectionNoQuorum))?;
-        map.serialize_entry("update_election_is_finished", &(self.census_group.update_election_status == ElectionStatus::ElectionFinished))?;
+        map.serialize_entry("election_is_running", &(self.election_status.as_ref() == &ElectionStatus::ElectionInProgress))?;
+        map.serialize_entry("election_is_no_quorum", &(self.election_status.as_ref() == &ElectionStatus::ElectionNoQuorum))?;
+        map.serialize_entry("election_is_finished", &(self.election_status.as_ref() == &ElectionStatus::ElectionFinished))?;
+        map.serialize_entry("update_election_is_running",  &(self.update_election_status.as_ref() == &ElectionStatus::ElectionInProgress))?;
+        map.serialize_entry("update_election_is_no_quorum", &(self.update_election_status.as_ref() == &ElectionStatus::ElectionNoQuorum))?;
+        map.serialize_entry("update_election_is_finished", &(self.update_election_status.as_ref() == &ElectionStatus::ElectionFinished))?;
 
-        map.serialize_entry("me", &SvcMember(self.census_group.me().expect("Missing 'me'")))?;
-        map.serialize_entry("members", &self.census_group
-                            .members()
+        map.serialize_entry("me", &SvcMember(&self.me))?;
+        map.serialize_entry("members", &self.members
                             .iter()
                             .map(|m| SvcMember(m))
                             .collect::<Vec<SvcMember<'a>>>())?;
-        map.serialize_entry("leader", &self.census_group.leader().map(|m| SvcMember(m)))?;
+        map.serialize_entry("leader", &self.leader.map(|m| SvcMember(m)))?;
         map.serialize_entry("first", &self.first)?;
-        map.serialize_entry("update_leader", &self.census_group.update_leader().map(|m| SvcMember(m)))?;
+        map.serialize_entry("update_leader", &self.update_leader.map(|m| SvcMember(m)))?;
 
         map.end()
     }

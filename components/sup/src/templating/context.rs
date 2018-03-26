@@ -18,13 +18,15 @@ use std::result;
 
 use serde::{Serialize, Serializer};
 use serde::ser::SerializeMap;
+use toml;
 
+use butterfly::rumor::service::SysInfo;
 use hcore::service::ServiceGroup;
+use hcore::package::PackageIdent;
 
-use census::{CensusGroup, CensusMember, CensusRing, ElectionStatus};
+use census::{CensusGroup, CensusMember, CensusRing, ElectionStatus, MemberId};
 use manager::Sys;
 use manager::service::{Cfg, Pkg, ServiceBind};
-
 use templating::system_info::SystemInfo;
 use templating::package::Package;
 
@@ -62,7 +64,7 @@ impl<'a> BindGroup<'a> {
     fn new(group: &'a CensusGroup) -> Self {
         BindGroup {
             first: select_first(group),
-            members: group.members().iter().map(|m| SvcMember(m)).collect(),
+            members: group.members().iter().map(|m| SvcMember::from_census_member(m)).collect(),
         }
     }
 }
@@ -172,21 +174,81 @@ impl<'a> Serialize for Svc<'a> {
         map.serialize_entry("update_election_is_no_quorum", &(self.update_election_status.as_ref() == &ElectionStatus::ElectionNoQuorum))?;
         map.serialize_entry("update_election_is_finished", &(self.update_election_status.as_ref() == &ElectionStatus::ElectionFinished))?;
 
-        map.serialize_entry("me", &SvcMember(&self.me))?;
+        map.serialize_entry("me", &SvcMember::from_census_member(&self.me))?;
         map.serialize_entry("members", &self.members
                             .iter()
-                            .map(|m| SvcMember(m))
+                            .map(|m| SvcMember::from_census_member(m))
                             .collect::<Vec<SvcMember<'a>>>())?;
-        map.serialize_entry("leader", &self.leader.map(|m| SvcMember(m)))?;
+        map.serialize_entry("leader", &self.leader.map(|m| SvcMember::from_census_member(m)))?;
         map.serialize_entry("first", &self.first)?;
-        map.serialize_entry("update_leader", &self.update_leader.map(|m| SvcMember(m)))?;
+        map.serialize_entry("update_leader", &self.update_leader.map(|m| SvcMember::from_census_member(m)))?;
 
         map.end()
     }
 }
 
 #[derive(Clone, Debug)]
-pub struct SvcMember<'a>(&'a CensusMember);
+pub struct SvcMember<'a> {
+    pub member_id: Cow<'a, MemberId>,
+    pub pkg: Cow<'a, Option<PackageIdent>>,
+    pub application: Cow<'a, Option<String>>,
+    pub environment: Cow<'a, Option<String>>,
+    pub service: Cow<'a, String>,
+    pub group: Cow<'a, String>,
+    pub org: Cow<'a, Option<String>>,
+    pub persistent: bool,
+    pub leader: bool,
+    pub follower: bool,
+    pub update_leader: bool,
+    pub update_follower: bool,
+    pub election_is_running: bool,
+    pub election_is_no_quorum: bool,
+    pub election_is_finished: bool,
+    pub update_election_is_running: bool,
+    pub update_election_is_no_quorum: bool,
+    pub update_election_is_finished: bool,
+    pub sys: Cow<'a, SysInfo>,
+    pub alive: bool,
+    pub suspect: bool,
+    pub confirmed: bool,
+    pub departed: bool,
+    pub cfg: Cow<'a, toml::value::Table>
+}
+
+impl<'a> SvcMember<'a> {
+    pub fn from_census_member(c: &'a CensusMember) -> Self {
+        SvcMember {
+            member_id: Cow::Borrowed(&c.member_id),
+            pkg: Cow::Borrowed(&c.pkg),
+            application: Cow::Borrowed(&c.application),
+            environment: Cow::Borrowed(&c.environment),
+            service: Cow::Borrowed(&c.service),
+            group: Cow::Borrowed(&c.group),
+            org: Cow::Borrowed(&c.org),
+            persistent: c.persistent,
+            leader: c.leader,
+            follower: c.follower,
+            update_leader: c.update_leader,
+            update_follower: c.update_follower,
+            election_is_running: c.election_is_running,
+            election_is_no_quorum: c.election_is_no_quorum,
+            election_is_finished: c.election_is_finished,
+            update_election_is_running: c.update_election_is_running,
+            update_election_is_no_quorum: c.update_election_is_no_quorum,
+            update_election_is_finished: c.update_election_is_finished,
+
+            // TODO (CM): unify this with other sys
+            sys: Cow::Borrowed(&c.sys),
+            alive: c.alive(),
+            suspect: c.suspect(),
+            confirmed: c.confirmed(),
+            departed: c.departed(),
+            cfg: Cow::Borrowed(&c.cfg),
+        }
+
+    }
+
+}
 
 impl<'a> Serialize for SvcMember<'a> {
     fn serialize<S>(&self, serializer: S) -> result::Result<S::Ok, S::Error>
@@ -195,7 +257,7 @@ impl<'a> Serialize for SvcMember<'a> {
     {
         let mut map = serializer.serialize_map(Some(24))?;
 
-        map.serialize_entry("member_id", &self.0.member_id)?;
+        map.serialize_entry("member_id", &self.member_id)?;
 
         // NOTE (CM): pkg is actually optional on CensusMember
 
@@ -208,48 +270,48 @@ impl<'a> Serialize for SvcMember<'a> {
 
         // TODO (CM): assuming these are all meant to be Some and
         // fully-qualified once we get to this point, right?
-        map.serialize_entry("pkg", &self.0.pkg)?;
+        map.serialize_entry("pkg", &self.pkg)?;
 
         // TODO (CM): add entry for entire service_group name in a
         // single string
-        map.serialize_entry("service", &self.0.service)?;
-        map.serialize_entry("group", &self.0.group)?;
-        map.serialize_entry("application", &self.0.application)?;
-        map.serialize_entry("environment", &self.0.environment)?;
-        map.serialize_entry("org", &self.0.org)?;
+        map.serialize_entry("service", &self.service)?;
+        map.serialize_entry("group", &self.group)?;
+        map.serialize_entry("application", &self.application)?;
+        map.serialize_entry("environment", &self.environment)?;
+        map.serialize_entry("org", &self.org)?;
 
         // TODO (CM): we actually spell it correctly here... it's not "permanent"
         // TODO (CM): add an "is_persistent" field to make it clear it's a boolean
-        map.serialize_entry("persistent", &self.0.persistent)?;
+        map.serialize_entry("persistent", &self.persistent)?;
         // TODO (CM): add an "is_leader" field to make it clear it's a boolean
-        map.serialize_entry("leader", &self.0.leader)?;
+        map.serialize_entry("leader", &self.leader)?;
         // TODO (CM): is_follower
-        map.serialize_entry("follower", &self.0.follower)?;
+        map.serialize_entry("follower", &self.follower)?;
         // TODO (CM): is_update_leader
-        map.serialize_entry("update_leader", &self.0.update_leader)?;
+        map.serialize_entry("update_leader", &self.update_leader)?;
         // TODO (CM): is_update_follower
-        map.serialize_entry("update_follower", &self.0.update_follower)?;
+        map.serialize_entry("update_follower", &self.update_follower)?;
 
-        map.serialize_entry("election_is_running", &self.0.election_is_running)?;
-        map.serialize_entry("election_is_no_quorum", &self.0.election_is_no_quorum)?;
-        map.serialize_entry("election_is_finished", &self.0.election_is_finished)?;
-        map.serialize_entry("update_election_is_running",  &self.0.update_election_is_running)?;
-        map.serialize_entry("update_election_is_no_quorum", &self.0.update_election_is_no_quorum)?;
-        map.serialize_entry("update_election_is_finished", &self.0.update_election_is_finished)?;
+        map.serialize_entry("election_is_running", &self.election_is_running)?;
+        map.serialize_entry("election_is_no_quorum", &self.election_is_no_quorum)?;
+        map.serialize_entry("election_is_finished", &self.election_is_finished)?;
+        map.serialize_entry("update_election_is_running",  &self.update_election_is_running)?;
+        map.serialize_entry("update_election_is_no_quorum", &self.update_election_is_no_quorum)?;
+        map.serialize_entry("update_election_is_finished", &self.update_election_is_finished)?;
 
         // TODO (CM): this is a SysInfo, not a Sys or
         // SystemInfo... ugh; NORMALIZE IT ALL
-        map.serialize_entry("sys", &self.0.sys)?;
+        map.serialize_entry("sys", &self.sys)?;
 
         // TODO (CM): ugh, these aren't public on
         // CensusMember... actually, why are they private, and nothing
         // else is?
-        map.serialize_entry("alive", &self.0.alive())?;
-        map.serialize_entry("suspect", &self.0.suspect())?;
-        map.serialize_entry("confirmed", &self.0.confirmed())?;
-        map.serialize_entry("departed", &self.0.departed())?;
+        map.serialize_entry("alive", &self.alive)?;
+        map.serialize_entry("suspect", &self.suspect)?;
+        map.serialize_entry("confirmed", &self.confirmed)?;
+        map.serialize_entry("departed", &self.departed)?;
 
-        map.serialize_entry("cfg", &self.0.cfg)?;
+        map.serialize_entry("cfg", &self.cfg)?;
 
         map.end()
     }
@@ -260,10 +322,10 @@ impl<'a> Serialize for SvcMember<'a> {
 /// `.first` field in `bind` and `svc`.
 fn select_first(census_group: &CensusGroup) -> Option<SvcMember> {
     match census_group.leader() {
-        Some(member) => Some(SvcMember(member)),
+        Some(member) => Some(SvcMember::from_census_member(member)),
         None => {
             census_group.members().first().and_then(
-                |m| Some(SvcMember(m)),
+                |m| Some(SvcMember::from_census_member(m)),
             )
         }
     }

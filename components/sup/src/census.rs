@@ -34,7 +34,7 @@ use error::{Error, SupError};
 
 static LOGKEY: &'static str = "CE";
 
-type MemberId = String;
+pub type MemberId = String;
 
 #[derive(Debug, Serialize)]
 pub struct CensusRing {

@@ -348,39 +348,20 @@ fn select_first(census_group: &CensusGroup) -> Option<SvcMember> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
+    use std::io::Write;
+    use std::io::Read;
     use json;
-
-    use valico;
     use serde_json;
     use std::fs;
     use valico::json_schema;
-    use std::io::Read;
-    use std::path::Path;
-
     use std::path::PathBuf;
-    use hcore::fs::USER_CONFIG_FILE;
     use tempdir::TempDir;
     use manager::service::config::PackageConfigPaths;
     use std::net::IpAddr;
     use std::net::Ipv4Addr;
     use std::collections::BTreeMap;
     use hcore::package::PackageIdent;
-
-    use manager::service::config::UserConfigPath;
-
     use manager::service::Cfg;
-
-
-    // use manager::service::config::test::toml_from_str;
-    fn toml_from_str(content: &str) -> toml::value::Table {
-        toml::from_str(content).expect(&format!("Content should parse as TOML: {}", content))
-    }
-
-    use std::fs::OpenOptions;
-
-    use std::io::Write;
-
     use manager::service::Env;
 
     // pub struct Validator<'a> {
@@ -464,27 +445,6 @@ mod tests {
         schema.validate(&input)
     }
 
-    // TODO (CM): dump a real context, turn it into a file, and have
-    // _that_ be the test
-
-    #[test]
-    fn test_basic_validation_works() {
-        let data = r#"{
-"sys": {},
-"pkg": {},
-"svc": {},
-"bind": {
-    "foo": {
-         "first": {},
-         "members": [{}],
-         "lolwut": {}
-    }
-},
-"cfg": {}
-}"#;
-        assert_valid(&data);
-    }
-
     struct TestPkg {
         base_path: PathBuf,
     }
@@ -519,84 +479,66 @@ mod tests {
         }
     }
 
-    struct CfgTestData {
-        // We hold tmp here only to make sure that the temporary
-        // directory gets deleted at the end of the test.
-        #[allow(dead_code)]
-        tmp: TempDir,
-        pkg: TestPkg,
-        rucp: PathBuf,
-        ducp: PathBuf,
-    }
+    fn new_test_pkg() -> (TempDir, TestPkg) {
+        let tmp = TempDir::new("habitat_config_test").expect("create temp dir");
+        let pkg = TestPkg::new(&tmp);
 
-    impl CfgTestData {
-        fn new() -> Self {
-            let tmp = TempDir::new("habitat_config_test").expect("create temp dir");
-            let pkg = TestPkg::new(&tmp);
-            let rucp = pkg.recommended_user_config_dir().join(USER_CONFIG_FILE);
-            let ducp = pkg.deprecated_user_config_dir().join(USER_CONFIG_FILE);
-            Self {
-                tmp: tmp,
-                pkg: pkg,
-                rucp: rucp,
-                ducp: ducp,
-            }
-        }
-    }
+        let default_toml = pkg.default_config_dir().join("default.toml");
+        let mut buffer = fs::File::create(default_toml).expect("couldn't write file");
+        buffer.write_all(r#"
+foo = "bar"
+baz = "boo"
 
-    fn write_toml<P: AsRef<Path>>(path: &P, text: &str) {
-        let mut file = OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .open(path)
-            .expect("create toml file");
-        file.write_all(text.as_bytes()).expect(
-            "write raw toml value",
-        );
-        file.flush().expect("flush changes in toml file");
-    }
-
-    fn toml_value_from_str(text: &str) -> toml::Value {
-        toml::Value::Table(toml_from_str(text))
-    }
-
-    #[test]
-    fn default_to_recommended_user_toml_if_missing() {
-        let cfg_data = CfgTestData::new();
-        let cfg = Cfg::new(&cfg_data.pkg, None).expect("create config");
-
-        assert_eq!(
-            cfg.user_config_path,
-            UserConfigPath::Recommended(cfg_data.pkg.recommended_user_config_dir())
-        );
-        assert!(cfg.user.is_none());
+[foobar]
+one = 1
+two = 2
+"#.as_bytes()).expect("Couldn't write default.toml");
+        (tmp, pkg)
     }
 
     fn assert_valid(json_string: &str) {
-
         let result = validate_string(json_string);
-        assert!(result.is_valid(),
-                r#"JSON is not valid!
+        if !result.is_valid() {
+            let error_string = result
+                .errors
+                .into_iter()
+                .map(|x| format!("  {:?}", x))
+                .collect::<Vec<String>>()
+                .join("\n");
+            let pretty_json = json::stringify_pretty(
+                json::parse(json_string)
+                    .expect("JSON should parse if we get this far"),
+                2);
+            assert!(false, r#"
+JSON does not validate!
 Errors:
 {}
 
 JSON:
 {}
 "#,
-                result
-                .errors
-                .into_iter()
-                .map(|x| format!("  {:?}", x))
-                .collect::<Vec<String>>()
-                .join("\n"),
-
-                json::stringify_pretty(json::parse(json_string).unwrap(), 2)
-        );
+                    error_string,
+                    pretty_json);
+        }
     }
 
     #[test]
-    fn test_name() {
+    fn sample_context_is_valid() {
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests")
+            .join("fixtures")
+            .join("sample_render_context.json");
+
+
+        let mut f = fs::File::open(path).expect("could not open sample_render_context.json");
+        let mut json = String::new();
+        f.read_to_string(&mut json).expect("could not read sample_render_context.json");
+
+        assert_valid(&json);
+    }
+
+    #[test]
+    fn constructed_render_context_is_valid() {
         let system_info = SystemInfo {
             version: Cow::Owned("I AM A HABITAT VERSION".into()),
             member_id: Cow::Owned("MEMBER_ID".into()),
@@ -611,6 +553,16 @@ JSON:
 
         let ident = PackageIdent::new("core", "test_pkg", Some("1.0.0"), Some("20180321150416"));
 
+        let deps = vec![
+            PackageIdent::new("test", "pkg1", Some("1.0.0"), Some("20180321150416")),
+            PackageIdent::new("test", "pkg2", Some("2.0.0"), Some("20180321150416")),
+            PackageIdent::new("test", "pkg3", Some("3.0.0"), Some("20180321150416"))
+        ];
+
+        let mut env_hash = HashMap::new();
+        env_hash.insert("PATH".into(), "/foo:/bar:/baz".into());
+        env_hash.insert("SECRET".into(), "sooperseekrit".into());
+
         let pkg = Package {
             ident: Cow::Borrowed(&ident),
             // TODO (CM): have Pkg use FullyQualifiedPackageIdent, and
@@ -621,10 +573,10 @@ JSON:
             name: Cow::Borrowed(&ident.name),
             version: Cow::Owned(ident.version.clone().unwrap()),
             release: Cow::Owned(ident.release.clone().unwrap()),
-            deps: Cow::Owned(vec![]),
-            env: Cow::Owned(Env(HashMap::new())),
-            exposes: Cow::Owned(vec![]),
-            exports: Cow::Owned(HashMap::new()),
+            deps: Cow::Owned(deps),
+            env: Cow::Owned(Env(env_hash)),
+            exposes: Cow::Owned(vec!["1234".into(), "8000".into(), "2112".into()]),
+            exports: Cow::Owned(HashMap::new()), // TODO (CM): Need real data
             path: Cow::Owned("my_path".into()),
             svc_path: Cow::Owned("svc_path".into()),
             svc_config_path: Cow::Owned("config_path".into()),
@@ -640,11 +592,15 @@ JSON:
 
         let group: ServiceGroup = "foo.default".parse().unwrap();
 
-        let cfg_data = CfgTestData::new();
-        let cfg = Cfg::new(&cfg_data.pkg, None).expect("create config");
+        let (tmp_dir, test_pkg) = new_test_pkg();
+        let cfg = Cfg::new(&test_pkg, None).expect("create config");
 
         use butterfly::rumor::service::SysInfo;
         let sys_info = SysInfo::new();
+
+        // TODO (CM): just create a toml table directly
+        let mut svc_member_cfg = BTreeMap::new();
+        svc_member_cfg.insert("foo".into(), "bar".into());
 
         let me = SvcMember {
             member_id: Cow::Owned("MEMBER_ID".into()),
@@ -670,21 +626,27 @@ JSON:
             suspect: false,
             confirmed: false,
             departed: false,
-            cfg: Cow::Owned(BTreeMap::new() as toml::value::Table),
+            cfg: Cow::Owned(svc_member_cfg as toml::value::Table),
         };
 
         let svc = Svc {
             service_group: Cow::Borrowed(&group),
             election_status: Cow::Owned(ElectionStatus::ElectionInProgress),
             update_election_status: Cow::Owned(ElectionStatus::ElectionFinished),
-            members: Cow::Owned(vec![]),
+            members: Cow::Owned(vec![me.clone()]),
             leader: Cow::Owned(None),
             update_leader: Cow::Owned(None),
-            me: Cow::Borrowed(&me),
+            me: Cow::Owned(me.clone()),
             first: me.clone(),
         };
 
-        let binds = Binds(HashMap::new());
+        let mut bind_map = HashMap::new();
+        let bind_group = BindGroup{
+            first: Some(me.clone()),
+            members: vec![me.clone()]
+        };
+        bind_map.insert("foo".into(), bind_group);
+        let binds = Binds(bind_map);
 
         let render_context = RenderContext{
             system_info: system_info,

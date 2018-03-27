@@ -32,6 +32,7 @@ pub struct Package<'a> {
     pub release: Cow<'a, String>,
     pub deps: Cow<'a, Vec<PackageIdent>>,
     pub env: Cow<'a, Env>,
+    // TODO (CM): Ideally, this would be Vec<u16>, since they're ports.
     pub exposes: Cow<'a, Vec<String>>,
     pub exports: Cow<'a, HashMap<String, String>>,
     // TODO (CM): Maybe Path instead of Cow<'a PathBuf>?

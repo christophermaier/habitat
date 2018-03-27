@@ -135,11 +135,10 @@ struct Svc<'a> {
     service_group: Cow<'a, ServiceGroup>,
     election_status: Cow<'a, ElectionStatus>,
     update_election_status: Cow<'a, ElectionStatus>,
-    members: Cow<'a, Vec<&'a CensusMember>>,
-    leader: Cow<'a, Option<&'a CensusMember>>,
-    update_leader: Cow<'a, Option<&'a CensusMember>>,
-    me: Cow<'a, CensusMember>,
-
+    members: Cow<'a, Vec<SvcMember<'a>>>,
+    leader: Cow<'a, Option<SvcMember<'a>>>,
+    update_leader: Cow<'a, Option<SvcMember<'a>>>,
+    me: Cow<'a, SvcMember<'a>>,
     // TODO (CM): this will need to be optional soon
     first: SvcMember<'a>,
 }
@@ -150,11 +149,18 @@ impl<'a> Svc<'a> {
             service_group: Cow::Borrowed(&census_group.service_group),
             election_status: Cow::Borrowed(&census_group.election_status),
             update_election_status: Cow::Borrowed(&census_group.update_election_status),
-            members: Cow::Owned(census_group.members()),
-            me: Cow::Borrowed(&census_group.me().expect("Missing 'me'")),
-            leader: Cow::Owned(census_group.leader()),
-            update_leader: Cow::Owned(census_group.update_leader()),
+            members: Cow::Owned(census_group.members()
+                                .iter()
+                                .map(|m| SvcMember::from_census_member(m))
+                                .collect::<Vec<SvcMember<'a>>>()),
 
+
+            me: Cow::Owned(census_group.me().map(|m| SvcMember::from_census_member(m)).expect("Missing 'me'")),
+
+
+
+            leader: Cow::Owned(census_group.leader().map(|m| SvcMember::from_census_member(m))),
+            update_leader: Cow::Owned(census_group.update_leader().map(|m| SvcMember::from_census_member(m))),
             first: select_first(census_group).expect("First should always be present on svc"),
         }
     }
@@ -180,14 +186,11 @@ impl<'a> Serialize for Svc<'a> {
         map.serialize_entry("update_election_is_no_quorum", &(self.update_election_status.as_ref() == &ElectionStatus::ElectionNoQuorum))?;
         map.serialize_entry("update_election_is_finished", &(self.update_election_status.as_ref() == &ElectionStatus::ElectionFinished))?;
 
-        map.serialize_entry("me", &SvcMember::from_census_member(&self.me))?;
-        map.serialize_entry("members", &self.members
-                            .iter()
-                            .map(|m| SvcMember::from_census_member(m))
-                            .collect::<Vec<SvcMember<'a>>>())?;
-        map.serialize_entry("leader", &self.leader.map(|m| SvcMember::from_census_member(m)))?;
+        map.serialize_entry("me", &self.me)?;
+        map.serialize_entry("members", &self.members)?;
+        map.serialize_entry("leader", &self.leader)?;
         map.serialize_entry("first", &self.first)?;
-        map.serialize_entry("update_leader", &self.update_leader.map(|m| SvcMember::from_census_member(m)))?;
+        map.serialize_entry("update_leader", &self.update_leader)?;
 
         map.end()
     }
@@ -373,7 +376,6 @@ mod tests {
     fn toml_from_str(content: &str) -> toml::value::Table {
         toml::from_str(content).expect(&format!("Content should parse as TOML: {}", content))
     }
-
 
     use std::fs::OpenOptions;
 
@@ -644,14 +646,14 @@ JSON:
         use butterfly::rumor::service::SysInfo;
         let sys_info = SysInfo::new();
 
-        let me = CensusMember {
-            member_id: "MEMBER_ID".into(),
-            pkg: Some(ident.clone()),
-            application: None,
-            environment: None,
-            service: "foo".into(),
-            group: "default".into(),
-            org: None,
+        let me = SvcMember {
+            member_id: Cow::Owned("MEMBER_ID".into()),
+            pkg: Cow::Owned(Some(ident.clone())),
+            application: Cow::Owned(None),
+            environment: Cow::Owned(None),
+            service: Cow::Owned("foo".into()),
+            group: Cow::Owned("default".into()),
+            org: Cow::Owned(None),
             persistent: true,
             leader: false,
             follower: false,
@@ -663,15 +665,13 @@ JSON:
             update_election_is_running: false,
             update_election_is_no_quorum: false,
             update_election_is_finished: false,
-            sys: sys_info,
+            sys: Cow::Owned(sys_info),
             alive: true,
             suspect: false,
             confirmed: false,
             departed: false,
-            health: Health::Alive,
-            cfg: BTreeMap::new(),
+            cfg: Cow::Owned(BTreeMap::new() as toml::value::Table),
         };
-        let svc_member_me = SvcMember::from_census_member(&me);
 
         let svc = Svc {
             service_group: Cow::Borrowed(&group),
@@ -681,13 +681,10 @@ JSON:
             leader: Cow::Owned(None),
             update_leader: Cow::Owned(None),
             me: Cow::Borrowed(&me),
-            first: svc_member_me,
+            first: me.clone(),
         };
 
-
         let binds = Binds(HashMap::new());
-
-
 
         let render_context = RenderContext{
             system_info: system_info,

@@ -71,13 +71,7 @@ impl<'a> Serialize for SystemInfo<'a> {
         map.serialize_entry("gossip_port", &self.gossip_port)?;
         map.serialize_entry("http_gateway_ip", &self.http_gateway_ip)?;
         map.serialize_entry("http_gateway_port", &self.http_gateway_port)?;
-
-        // This key is to support the old legacy behavior
         map.serialize_entry("permanent", &self.permanent)?;
-
-        // This is what `permanent` should have been from the beginning
-        map.serialize_entry("persistent", &self.permanent)?;
-
         map.end()
     }
 }

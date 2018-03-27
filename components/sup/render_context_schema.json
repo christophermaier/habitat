@@ -1,10 +1,196 @@
 {
     "$schema": "http://json-schema.org/draft-04/schema#",
     "description": "Some cool stuff",
-    "id": "https://habitat.sh/schemas/schema.json",
-
     "type": "object",
+    "definitions": {
+        "pkg": {
+            "type": "object",
+            "description": "TODO",
+            "properties": {
+                "origin": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "version": {
+                    "type": "string"
+                },
+                "release": {
+                    "type": "string"
+                }
+            },
+            "required": ["origin", "name", "version", "release"],
+            "additionalProperties": false
+        },
+        "svc_member": {
+            "type": "object",
+            "description": "TODO",
+            "properties": {
+                "member_id": {
+                    "type": "string",
+                    "description": "the member's Supervisor id, e.g., 3d1e73ff19464a27aea3cdc5c2243f74"
+                },
+                "alive": {
+                    "type": "boolean",
+                    "description": "whether this member is considered alive and connected to the ring, from a network perspective."
+                },
+                "suspect": {
+                    "type": "boolean",
+                    "description": "whether this member is considered \"suspect\", or possibly unreachable, from a network perspective."
+                },
+                "confirmed": {
+                    "type": "boolean",
+                    "description": "whether this member is confirmed dead / unreachable, from a network perspective."
+                },
+                "departed": {
+                    "type": "boolean",
+                    "description": "whether this member has been departed from the ring (i.e., permanently gone, never to return)."
+                },
 
+                "election_is_running": {
+                    "type": "boolean",
+                    "description": "whether a leader election is currently running for this service"
+                },
+                "election_is_no_quorum": {
+                    "type": "boolean",
+                    "description": "whether there is quorum for a leader election for this service"
+                },
+                "election_is_finished": {
+                    "type": "boolean",
+                    "description": "whether a leader election for this service has finished"
+                },
+                "update_election_is_running": {
+                    "type": "boolean",
+                    "description": "whether an update leader election is currently running for this service"
+                },
+                "update_election_is_no_quorum": {
+                    "type": "boolean",
+                    "description": "whether there is quorum for an update leader election for this service"
+                },
+                "update_election_is_finished": {
+                    "type": "boolean",
+                    "description": "whether an update leader election for this service has finished"
+                },
+                "leader": {
+                    "type": "boolean",
+                    "description": "whether this member is the leader in the service group (only meaningful in a leader topology)"
+                },
+                "follower": {
+                    "type": "boolean",
+                    "description": "whether this member is a follower in the service group (only meaningful in a leader topology)"
+                },
+                "update_leader": {
+                    "type": "boolean",
+                    "description": "whether this member is the update leader in the service group (only meaningful in a leader topology)"
+                },
+                "update_follower": {
+                    "type": "boolean",
+                    "description": "whether this member is an update follower in the service group (only meaningful in a leader topology)"
+                },
+                "pkg": {
+                    "description": "the release the member is running",
+                    "$ref": "#/definitions/pkg"
+                },
+                "sys": {
+                    "type": "object",
+                    "description": "An abbreviated version of the top-level {{sys}} object, containing networking information for the member.",
+                    "properties": {
+                        "ip": {
+                            "type": "string"
+                        },
+                        "hostname": {
+                            "type": "string"
+                        },
+                        "gossip_ip": {
+                            "type": "string"
+                        },
+                        "gossip_port": {
+                            "type": "integer"
+                        },
+                        "http_gateway_ip": {
+                            "type": "string"
+                        },
+                        "http_gateway_port": {
+                            "type": "integer"
+                        }
+                    },
+                    "required": [
+                        "ip",
+                        "hostname",
+                        "gossip_ip",
+                        "gossip_port",
+                        "http_gateway_ip",
+                        "http_gateway_port"
+                    ],
+                    "additionalProperties": false
+                },
+                "cfg": {
+                    "type": "object",
+                    "description": "The configuration the member is currently exporting. This is constrained by what is defined in pkg_exports, where the values are replaced with the current values (e.g., taking into account things like user.toml, gossiped configuration values, etc.)"
+                },
+                "persistent": {
+                    "type": "boolean",
+                    "description": "A misspelling of permanent; indicates whether a member is a permanent peer or not"
+                },
+                "service": {
+                    "type": "string",
+                    "description": "The name of the service. If the service is running from the package core/redis, the value will be redis."
+                },
+                "group": {
+                    "type": "string",
+                    "description": "The group portion of the service's complete group name. In the group name redis.default, the group's value is default."
+                },
+                "org": {
+                    "description": "The organization portion of a service group specification. Unused at this time.",
+                    "oneOf": [
+                        { "type": "string" },
+                        { "type": "null" }
+                    ]
+                },
+                "application": {
+                    "description": "The application portion of a service group specification. Unused at this time.",
+                    "oneOf": [
+                        { "type": "string" },
+                        { "type": "null" }
+                    ]
+                },
+                "environment": {
+                    "description": "The environment portion of a service group specification. Unused at this time.",
+                    "oneOf": [
+                        { "type": "string" },
+                        { "type": "null" }
+                    ]
+                }
+            },
+            "required": [
+                "member_id",
+                "alive",
+                "suspect",
+                "confirmed",
+                "departed",
+                "election_is_running",
+                "election_is_no_quorum",
+                "election_is_finished",
+                "update_election_is_running",
+                "update_election_is_no_quorum",
+                "update_election_is_finished",
+                "leader",
+                "follower",
+                "update_leader",
+                "update_follower",
+                "pkg",
+                "sys",
+                "cfg",
+                "persistent",
+                "service",
+                "group",
+                "org",
+                "application",
+                "environment"
+            ]
+        }
+    },
     "properties": {
         "sys": {
             "description": "Describes the details of how this specific Supervisor was started",
@@ -51,25 +237,224 @@
         },
         "pkg": {
             "description": "Details about the package currently running the service",
-            "type": "object"
-
+            "type": "object",
+            "properties": {
+                "ident": {
+                    "type": "string"
+                },
+                "origin": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "version": {
+                    "type": "string"
+                },
+                "release": {
+                    "type": "string"
+                },
+                "deps": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/pkg"
+                    }
+                },
+                "env": {
+                    "type": "object",
+                    "additionalProperties": { "type": "string" }
+                },
+                "exposes": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "exports": {
+                    "type": "object",
+                    "additionalProperties": { "type": "string" }
+                },
+                "path" : {
+                    "type": "string"
+                },
+                "svc_path" : {
+                    "type": "string"
+                },
+                "svc_config_path" : {
+                    "type": "string"
+                },
+                "svc_data_path" : {
+                    "type": "string"
+                },
+                "svc_files_path" : {
+                    "type": "string"
+                },
+                "svc_static_path" : {
+                    "type": "string"
+                },
+                "svc_var_path" : {
+                    "type": "string"
+                },
+                "svc_pid_file" : {
+                    "type": "string"
+                },
+                "svc_run" : {
+                    "type": "string"
+                },
+                "svc_user" : {
+                    "type": "string"
+                },
+                "svc_group" : {
+                    "type": "string"
+                }
+            },
+            "required": [
+                "ident",
+                "origin",
+                "name",
+                "version",
+                "release",
+                "deps",
+                "env",
+                "exposes",
+                "exports",
+                "path",
+                "svc_path",
+                "svc_config_path",
+                "svc_data_path",
+                "svc_files_path",
+                "svc_static_path",
+                "svc_var_path",
+                "svc_pid_file",
+                "svc_run",
+                "svc_user",
+                "svc_group"
+            ],
+            "additionalProperties": false
         },
         "cfg": {
             "description": "The configuration that is currently active for the service",
             "type": "object"
-
         },
         "svc": {
             "description": "Information about the current service's service group",
-            "type": "object"
-
+            "type": "object",
+            "properties": {
+                "service": {
+                    "type": "string",
+                    "description": "The name of the service. If the service is running from the package core/redis, the value will be redis."
+                },
+                "group": {
+                    "type": "string",
+                    "description": "The group portion of the service's complete group name. In the group name redis.default, the group's value is default."
+                },
+                "org": {
+                    "description": "The organization portion of a service group specification. Unused at this time.",
+                    "oneOf": [
+                        { "type": "string" },
+                        { "type": "null" }
+                    ]
+                },
+                "election_is_running": {
+                    "type": "boolean",
+                    "description": "whether a leader election is currently running for this service"
+                },
+                "election_is_no_quorum": {
+                    "type": "boolean",
+                    "description": "whether there is quorum for a leader election for this service"
+                },
+                "election_is_finished": {
+                    "type": "boolean",
+                    "description": "whether a leader election for this service has finished"
+                },
+                "update_election_is_running": {
+                    "type": "boolean",
+                    "description": "whether an update leader election is currently running for this service"
+                },
+                "update_election_is_no_quorum": {
+                    "type": "boolean",
+                    "description": "whether there is quorum for an update leader election for this service"
+                },
+                "update_election_is_finished": {
+                    "type": "boolean",
+                    "description": "whether an update leader election for this service has finished"
+                },
+                "me": {
+                    "description": "An object that provides information about the service running on the local Supervisor",
+                    "$ref": "#/definitions/svc_member"
+                },
+                "first": {
+                    "description": "The first member of this service group",
+                    "$ref": "#/definitions/svc_member"
+                },
+                "members": {
+                    "description": "All members of the service group, across the entire ring. Includes all liveness states!",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/svc_member"
+                    }
+                },
+                "leader": {
+                    "description": "The current leader of the service group, if any (null otherwise)",
+                    "$comment": "Can we just make this optional instead of nullable?",
+                    "oneOf": [
+                        { "$ref": "#/definitions/svc_member" },
+                        { "type": "null" }
+                    ]
+                },
+                "update_leader": {
+                    "description": "The current update_leader of the service group, if any (null otherwise)",
+                    "$comment": "Can we just make this optional instead of nullable?",
+                    "oneOf": [
+                        { "$ref": "#/definitions/svc_member" },
+                        { "type": "null" }
+                    ]
+                }
+            },
+            "required": [
+                "service",
+                "group",
+                "org",
+                "election_is_running",
+                "election_is_no_quorum",
+                "election_is_finished",
+                "update_election_is_running",
+                "update_election_is_no_quorum",
+                "update_election_is_finished",
+                "me",
+                "first",
+                "members",
+                "leader",
+                "update_leader"
+            ],
+            "additionalProperties": false
         },
         "bind": {
-            "description": "Exposes information about the service groups this service is bound to",
-            "type": "object"
+            "description": "Exposes information about the service groups this service is bound to. Each key is the name of a bind, while each value is one of the objects described below",
+            "type": "object",
+            "additionalProperties": {
+                "type": "object",
+                "properties": {
+                    "first": {
+                        "description": "The first member of this service group. If the group is running in a leader topology, this will also be the leader.",
+                        "$ref": "#/definitions/svc_member"
+                    },
+                    "members": {
+                        "description": "All members of the service group, across the entire ring. Includes all liveness states!",
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/definitions/svc_member"
+                        }
+                    }
+                },
+                "additionalProperties": false,
+                "required": [
+                    "first",
+                    "members"
+                ]
+            }
         }
     },
-
     "required": [
         "sys",
         "pkg",

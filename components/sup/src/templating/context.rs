@@ -344,6 +344,8 @@ fn select_first(census_group: &CensusGroup) -> Option<SvcMember> {
 mod tests {
     use super::*;
 
+    use json;
+
     use valico;
     use serde_json;
     use std::fs;
@@ -377,62 +379,102 @@ mod tests {
 
     use manager::service::Env;
 
-    pub struct Validator {
-        schema: valico::json_schema::schema::Schema
+    // pub struct Validator<'a> {
+    //     scope: valico::json_schema::Scope,
+    //     schema: valico::json_schema::schema::ScopedSchema<'a>
+    // }
+
+    // impl<'a> Validator<'a> {
+    //     pub fn new() -> Self {
+    //         // let mut schema = String::new();
+
+
+    //         // fs::File::open(&Path::new("render_context_schema.json"))
+    //         //     .expect("Cannot open schema file")
+    //         //     .read_to_string(&mut schema)
+    //         //     .expect("Could not read schema to string");
+
+
+    //         let schema = include_str!("../../render_context_schema.json");
+    //         println!(">>>>>>> schema! = {:?}", schema);
+
+    //         let v: serde_json::Value = serde_json::from_str(&schema)
+    //             .expect("Cannot parse schema as JSON");
+
+    //         let mut scope = json_schema::scope::Scope::new();
+    //         scope.compile(v.clone(), true).expect("Couldn't compile the schema!");
+
+    //         let schema = scope.compile_and_return(v.clone(), false).expect("wut");
+
+    //         // let v: serde_json::Value = serde_json::from_str(&schema)
+    //         //     .expect("Cannot parse schema as JSON");
+    //         // let compiled =
+    //         //     json_schema::schema::compile(v,
+    //         //                                  None,
+    //         //                                  json_schema::schema::CompilationSettings::new(
+    //         //                                      &json_schema::keywords::default(),
+    //         //                                      true
+    //         //                                  )
+    //         //     )
+    //         //     .expect("Cannot compile JSON schema");
+    //         println!(">>>>>>> schema = {:?}", schema);
+
+
+    //         Validator { scope: scope,
+    //                     schema: schema }
+    //     }
+
+    //     // pub fn validate(&self, input: &serde_json::Value) -> json_schema::ValidationState {
+    //     //     let scope = json_schema::scope::Scope::new();
+    //     //     let scoped_schema = json_schema::schema::ScopedSchema::new(&scope, &self.schema);
+    //     //     let result = scoped_schema.validate(&input);
+    //     //     result
+    //     // }
+
+    //     pub fn validate_string(&self, input: &str) -> json_schema::ValidationState {
+    //         let serde_value: serde_json::Value = serde_json::from_str(input).unwrap();
+    //         self.validate(&serde_value)
+    //     }
+
+    //     pub fn validate(&self, input: &serde_json::Value) -> json_schema::ValidationState {
+    //         self.schema.validate(&input)
+    //     }
+    // }
+
+    fn validate_string(input: &str) -> json_schema::ValidationState {
+        let serde_value: serde_json::Value = serde_json::from_str(input).unwrap();
+        validate(&serde_value)
     }
 
-    impl Validator {
-        pub fn new() -> Self {
-            // let mut schema = String::new();
+    fn validate(input: &serde_json::Value) -> json_schema::ValidationState {
+        let schema = include_str!("../../render_context_schema.json");
 
+        let v: serde_json::Value = serde_json::from_str(&schema)
+            .expect("Cannot parse schema as JSON");
 
-            // fs::File::open(&Path::new("render_context_schema.json"))
-            //     .expect("Cannot open schema file")
-            //     .read_to_string(&mut schema)
-            //     .expect("Could not read schema to string");
+        let mut scope = json_schema::scope::Scope::new();
+        // NOTE: using `false` instead of `true` allows us to use
+        // `$comment` keys
+        let schema = scope.compile_and_return(v.clone(), false).expect("Couldn't compile the schema");
 
-
-            let schema = include_str!("../../render_context_schema.json");
-            println!(">>>>>>> schema! = {:?}", schema);
-
-            let v: serde_json::Value = serde_json::from_str(&schema)
-                .expect("Cannot parse schema as JSON");
-            let compiled =
-                json_schema::schema::compile(v,
-                                             None,
-                                             json_schema::schema::CompilationSettings::new(
-                                                 &json_schema::keywords::default(),
-                                                 true
-                                             )
-                )
-                .expect("Cannot compile JSON schema");
-            println!(">>>>>>> compiled = {:?}", compiled);
-
-            Validator { schema: compiled }
-        }
-
-        pub fn validate(&self, input: &serde_json::Value) -> json_schema::ValidationState {
-            let scope = json_schema::scope::Scope::new();
-            let scoped_schema = json_schema::schema::ScopedSchema::new(&scope, &self.schema);
-            let result = scoped_schema.validate(&input);
-            result
-        }
-
-        pub fn validate_string(&self, input: &str) -> json_schema::ValidationState {
-            let serde_value: serde_json::Value = serde_json::from_str(input).unwrap();
-            self.validate(&serde_value)
-        }
+        schema.validate(&input)
     }
 
     #[test]
     fn test_basic_validation_works() {
         let data = r#"{
-                    "sys": {},
-                    "pkg": {},
-                    "svc": {},
-                    "bind": {},
-                    "cfg": {}
-                  }"#;
+"sys": {},
+"pkg": {},
+"svc": {},
+"bind": {
+    "foo": {
+         "first": {},
+         "members": [{}],
+         "lolwut": {}
+    }
+},
+"cfg": {}
+}"#;
         assert_valid(&data);
     }
 
@@ -524,18 +566,26 @@ mod tests {
         assert!(cfg.user.is_none());
     }
 
-    fn assert_valid(json: &str) {
-        println!(">>>>>>> json = {:?}", json);
+    fn assert_valid(json_string: &str) {
 
-        let result = Validator::new().validate_string(json);
-        println!(">>>>>>> result = {:?}", result);
-
+        let result = validate_string(json_string);
         assert!(result.is_valid(),
                 r#"JSON is not valid!
+Errors:
+{}
 
-                   Errors:
-                   {:?}
-                "#, result.errors);
+JSON:
+{}
+"#,
+                result
+                .errors
+                .into_iter()
+                .map(|x| format!("  {:?}", x))
+                .collect::<Vec<String>>()
+                .join("\n"),
+
+                json::stringify_pretty(json::parse(json_string).unwrap(), 2)
+        );
     }
 
     #[test]

@@ -61,6 +61,9 @@ toml = { version = "*", default-features = false }
 url = "*"
 valico ="*"
 
+# TODO: really, only use this in tests
+json = "*"
+
 [target.'cfg(target_os = "linux")'.dependencies]
 caps = "*"
 

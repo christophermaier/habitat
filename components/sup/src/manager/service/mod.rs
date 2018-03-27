@@ -14,7 +14,7 @@
 
 pub mod hooks;
 mod composite_spec;
-mod config;
+pub mod config;
 mod dir;
 mod health;
 mod package;

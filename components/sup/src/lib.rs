@@ -84,6 +84,7 @@ extern crate tempdir;
 extern crate time;
 extern crate toml;
 extern crate url;
+extern crate valico;
 
 #[macro_export]
 /// Creates a new SupError, embedding the current file name, line number, column, and module path.

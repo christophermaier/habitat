@@ -80,6 +80,11 @@ impl<'a> BindGroup<'a> {
 /// User-facing documentation is available at
 /// https://www.habitat.sh/docs/reference/#template-data; update that
 /// as required.
+
+// TODO (CM): None of these fields need to be public; making them
+// private may be nice to preserve information hiding. Tests will
+// prove this out, though.
+
 #[derive(Clone, Debug, Serialize)]
 pub struct RenderContext<'a> {
     #[serde(rename = "sys")]
@@ -187,6 +192,9 @@ impl<'a> Serialize for Svc<'a> {
     }
 }
 
+// TODO (CM): move this to separate file
+
+
 #[derive(Clone, Debug)]
 pub struct SvcMember<'a> {
     pub member_id: Cow<'a, MemberId>,
@@ -248,6 +256,9 @@ impl<'a> SvcMember<'a> {
 
     }
 
+    // #[cfg(test)]
+    // pub constructor_for_test() -> Self {
+    // }
 }
 
 impl<'a> Serialize for SvcMember<'a> {
@@ -258,8 +269,6 @@ impl<'a> Serialize for SvcMember<'a> {
         let mut map = serializer.serialize_map(Some(24))?;
 
         map.serialize_entry("member_id", &self.member_id)?;
-
-        // NOTE (CM): pkg is actually optional on CensusMember
 
         // TODO (CM): pkg is currently serialized as a map with
         // origin, name, version, and release keys. We should also add
@@ -329,4 +338,313 @@ fn select_first(census_group: &CensusGroup) -> Option<SvcMember> {
             )
         }
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use valico;
+    use serde_json;
+    use std::fs;
+    use valico::json_schema;
+    use std::io::Read;
+    use std::path::Path;
+
+    use std::path::PathBuf;
+    use hcore::fs::USER_CONFIG_FILE;
+    use tempdir::TempDir;
+    use manager::service::config::PackageConfigPaths;
+    use std::net::IpAddr;
+    use std::net::Ipv4Addr;
+    use std::collections::BTreeMap;
+    use hcore::package::PackageIdent;
+
+    use manager::service::config::UserConfigPath;
+
+    use manager::service::Cfg;
+
+
+    // use manager::service::config::test::toml_from_str;
+    fn toml_from_str(content: &str) -> toml::value::Table {
+        toml::from_str(content).expect(&format!("Content should parse as TOML: {}", content))
+    }
+
+
+    use std::fs::OpenOptions;
+
+    use std::io::Write;
+
+    use manager::service::Env;
+
+    pub struct Validator {
+        schema: valico::json_schema::schema::Schema
+    }
+
+    impl Validator {
+        pub fn new() -> Self {
+            // let mut schema = String::new();
+
+
+            // fs::File::open(&Path::new("render_context_schema.json"))
+            //     .expect("Cannot open schema file")
+            //     .read_to_string(&mut schema)
+            //     .expect("Could not read schema to string");
+
+
+            let schema = include_str!("../../render_context_schema.json");
+            println!(">>>>>>> schema! = {:?}", schema);
+
+            let v: serde_json::Value = serde_json::from_str(&schema)
+                .expect("Cannot parse schema as JSON");
+            let compiled =
+                json_schema::schema::compile(v,
+                                             None,
+                                             json_schema::schema::CompilationSettings::new(
+                                                 &json_schema::keywords::default(),
+                                                 true
+                                             )
+                )
+                .expect("Cannot compile JSON schema");
+            println!(">>>>>>> compiled = {:?}", compiled);
+
+            Validator { schema: compiled }
+        }
+
+        pub fn validate(&self, input: &serde_json::Value) -> json_schema::ValidationState {
+            let scope = json_schema::scope::Scope::new();
+            let scoped_schema = json_schema::schema::ScopedSchema::new(&scope, &self.schema);
+            let result = scoped_schema.validate(&input);
+            result
+        }
+
+        pub fn validate_string(&self, input: &str) -> json_schema::ValidationState {
+            let serde_value: serde_json::Value = serde_json::from_str(input).unwrap();
+            self.validate(&serde_value)
+        }
+    }
+
+    #[test]
+    fn test_basic_validation_works() {
+        let data = r#"{
+                    "sys": {},
+                    "pkg": {},
+                    "svc": {},
+                    "bind": {},
+                    "cfg": {}
+                  }"#;
+        assert_valid(&data);
+    }
+
+    struct TestPkg {
+        base_path: PathBuf,
+    }
+
+    impl TestPkg {
+        fn new(tmp: &TempDir) -> Self {
+            let pkg = Self { base_path: tmp.path().to_owned() };
+
+            fs::create_dir_all(pkg.default_config_dir()).expect(
+                "create deprecated user config dir",
+            );
+            fs::create_dir_all(pkg.recommended_user_config_dir())
+                .expect("create recommended user config dir");
+            fs::create_dir_all(pkg.deprecated_user_config_dir())
+                .expect("create default config dir");
+            pkg
+        }
+    }
+
+    impl PackageConfigPaths for TestPkg {
+        fn name(&self) -> String {
+            String::from("testing")
+        }
+        fn default_config_dir(&self) -> PathBuf {
+            self.base_path.join("root")
+        }
+        fn recommended_user_config_dir(&self) -> PathBuf {
+            self.base_path.join("user")
+        }
+        fn deprecated_user_config_dir(&self) -> PathBuf {
+            self.base_path.join("svc")
+        }
+    }
+
+    struct CfgTestData {
+        // We hold tmp here only to make sure that the temporary
+        // directory gets deleted at the end of the test.
+        #[allow(dead_code)]
+        tmp: TempDir,
+        pkg: TestPkg,
+        rucp: PathBuf,
+        ducp: PathBuf,
+    }
+
+    impl CfgTestData {
+        fn new() -> Self {
+            let tmp = TempDir::new("habitat_config_test").expect("create temp dir");
+            let pkg = TestPkg::new(&tmp);
+            let rucp = pkg.recommended_user_config_dir().join(USER_CONFIG_FILE);
+            let ducp = pkg.deprecated_user_config_dir().join(USER_CONFIG_FILE);
+            Self {
+                tmp: tmp,
+                pkg: pkg,
+                rucp: rucp,
+                ducp: ducp,
+            }
+        }
+    }
+
+    fn write_toml<P: AsRef<Path>>(path: &P, text: &str) {
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(path)
+            .expect("create toml file");
+        file.write_all(text.as_bytes()).expect(
+            "write raw toml value",
+        );
+        file.flush().expect("flush changes in toml file");
+    }
+
+    fn toml_value_from_str(text: &str) -> toml::Value {
+        toml::Value::Table(toml_from_str(text))
+    }
+
+    #[test]
+    fn default_to_recommended_user_toml_if_missing() {
+        let cfg_data = CfgTestData::new();
+        let cfg = Cfg::new(&cfg_data.pkg, None).expect("create config");
+
+        assert_eq!(
+            cfg.user_config_path,
+            UserConfigPath::Recommended(cfg_data.pkg.recommended_user_config_dir())
+        );
+        assert!(cfg.user.is_none());
+    }
+
+    fn assert_valid(json: &str) {
+        println!(">>>>>>> json = {:?}", json);
+
+        let result = Validator::new().validate_string(json);
+        println!(">>>>>>> result = {:?}", result);
+
+        assert!(result.is_valid(),
+                r#"JSON is not valid!
+
+                   Errors:
+                   {:?}
+                "#, result.errors);
+    }
+
+    #[test]
+    fn test_name() {
+        let system_info = SystemInfo {
+            version: Cow::Owned("I AM A HABITAT VERSION".into()),
+            member_id: Cow::Owned("MEMBER_ID".into()),
+            ip: IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
+            hostname: Cow::Owned("MY_HOSTNAME".into()),
+            gossip_ip: IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)),
+            gossip_port: 1234,
+            http_gateway_ip: IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)),
+            http_gateway_port: 5678,
+            permanent: false
+        };
+
+        let ident = PackageIdent::new("core", "test_pkg", Some("1.0.0"), Some("20180321150416"));
+
+        let pkg = Package {
+            ident: Cow::Borrowed(&ident),
+            // TODO (CM): have Pkg use FullyQualifiedPackageIdent, and
+            // get origin, name, version, and release from it, rather
+            // than storing each individually; I suspect that was just
+            // for templating
+            origin: Cow::Borrowed(&ident.origin),
+            name: Cow::Borrowed(&ident.name),
+            version: Cow::Owned(ident.version.clone().unwrap()),
+            release: Cow::Owned(ident.release.clone().unwrap()),
+            deps: Cow::Owned(vec![]),
+            env: Cow::Owned(Env(HashMap::new())),
+            exposes: Cow::Owned(vec![]),
+            exports: Cow::Owned(HashMap::new()),
+            path: Cow::Owned("my_path".into()),
+            svc_path: Cow::Owned("svc_path".into()),
+            svc_config_path: Cow::Owned("config_path".into()),
+            svc_data_path: Cow::Owned("data_path".into()),
+            svc_files_path: Cow::Owned("files_path".into()),
+            svc_static_path: Cow::Owned("static_path".into()),
+            svc_var_path: Cow::Owned("var_path".into()),
+            svc_pid_file: Cow::Owned("pid_file".into()),
+            svc_run: Cow::Owned("svc_run".into()),
+            svc_user: Cow::Owned("hab".into()),
+            svc_group: Cow::Owned("hab".into()),
+        };
+
+        let group: ServiceGroup = "foo.default".parse().unwrap();
+
+        let cfg_data = CfgTestData::new();
+        let cfg = Cfg::new(&cfg_data.pkg, None).expect("create config");
+
+
+
+        use butterfly::rumor::service::SysInfo;
+        let sys_info = SysInfo::new();
+
+        let me = CensusMember {
+            member_id: "MEMBER_ID".into(),
+            pkg: Some(ident.clone()),
+            application: None,
+            environment: None,
+            service: "foo".into(),
+            group: "default".into(),
+            org: None,
+            persistent: true,
+            leader: false,
+            follower: false,
+            update_leader: false,
+            update_follower: false,
+            election_is_running: false,
+            election_is_no_quorum: false,
+            election_is_finished: false,
+            update_election_is_running: false,
+            update_election_is_no_quorum: false,
+            update_election_is_finished: false,
+            sys: sys_info,
+            alive: true,
+            suspect: false,
+            confirmed: false,
+            departed: false,
+            cfg: BTreeMap::new(),
+        };
+        let svc_member_me = SvcMember::from_census_member(&me);
+
+        let svc = Svc {
+            service_group: Cow::Borrowed(&group),
+            election_status: Cow::Owned(ElectionStatus::ElectionInProgress),
+            update_election_status: Cow::Owned(ElectionStatus::ElectionFinished),
+            members: Cow::Owned(vec![]),
+            leader: Cow::Owned(None),
+            update_leader: Cow::Owned(None),
+            me: Cow::Borrowed(&me),
+            first: svc_member_me,
+        };
+
+
+        let binds = Binds(HashMap::new());
+
+
+
+        let render_context = RenderContext{
+            system_info: system_info,
+            package: pkg,
+            cfg: &cfg,
+            svc: svc,
+            bind: binds
+        };
+
+        let j = serde_json::to_string(&render_context).expect("can't serialize to JSON");
+        assert_valid(&j);
+    }
+
 }

@@ -33,7 +33,7 @@ const PATH_KEY: &'static str = "PATH";
 static LOGKEY: &'static str = "PK";
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct Env(HashMap<String, String>);
+pub struct Env(pub HashMap<String, String>);
 
 impl Deref for Env {
     type Target = HashMap<String, String>;

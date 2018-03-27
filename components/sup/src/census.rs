@@ -504,10 +504,10 @@ pub struct CensusMember {
     pub update_election_is_no_quorum: bool,
     pub update_election_is_finished: bool,
     pub sys: SysInfo,
-    alive: bool,
-    suspect: bool,
-    confirmed: bool,
-    departed: bool,
+    pub alive: bool,
+    pub suspect: bool,
+    pub confirmed: bool,
+    pub departed: bool,
     // Maps must be represented last in a serializable struct for the current version of the toml
     // crate. Additionally, this deserialization method is required to correct any ordering issues
     // with the table being serialized - https://docs.rs/toml/0.4.0/toml/ser/fn.tables_last.html

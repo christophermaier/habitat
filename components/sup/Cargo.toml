@@ -59,6 +59,7 @@ tempdir = "*"
 time = "*"
 toml = { version = "*", default-features = false }
 url = "*"
+valico ="*"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 caps = "*"

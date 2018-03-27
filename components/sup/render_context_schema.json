@@ -1,0 +1,81 @@
+{
+    "$schema": "http://json-schema.org/draft-04/schema#",
+    "description": "Some cool stuff",
+    "id": "https://habitat.sh/schemas/schema.json",
+
+    "type": "object",
+
+    "properties": {
+        "sys": {
+            "description": "Describes the details of how this specific Supervisor was started",
+            "type": "object",
+            "properties": {
+                "version": {
+                    "type": "string"
+                },
+                "member_id": {
+                    "type": "string"
+                },
+                "ip": {
+                    "type": "string"
+                },
+                "hostname": {
+                    "type": "string"
+                },
+                "gossip_ip": {
+                    "type": "string"
+                },
+                "gossip_port": {
+                    "type": "integer"
+                },
+                "http_gateway_ip": {
+                    "type": "string"
+                },
+                "http_gateway_port": {
+                    "type": "integer"
+                },
+                "permanent": {
+                    "type": "boolean"
+                }
+            },
+            "required": ["version",
+                         "member_id",
+                         "ip",
+                         "hostname",
+                         "gossip_ip",
+                         "gossip_port",
+                         "http_gateway_ip",
+                         "http_gateway_port",
+                         "permanent"],
+            "additionalProperties": false
+        },
+        "pkg": {
+            "description": "Details about the package currently running the service",
+            "type": "object"
+
+        },
+        "cfg": {
+            "description": "The configuration that is currently active for the service",
+            "type": "object"
+
+        },
+        "svc": {
+            "description": "Information about the current service's service group",
+            "type": "object"
+
+        },
+        "bind": {
+            "description": "Exposes information about the service groups this service is bound to",
+            "type": "object"
+        }
+    },
+
+    "required": [
+        "sys",
+        "pkg",
+        "cfg",
+        "svc",
+        "bind"
+    ],
+    "additionalProperties": false
+}

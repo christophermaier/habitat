@@ -21,6 +21,7 @@ use serde::ser::SerializeMap;
 use toml;
 
 use butterfly::rumor::service::SysInfo;
+use butterfly::member::Health;
 use hcore::service::ServiceGroup;
 use hcore::package::PackageIdent;
 
@@ -247,10 +248,12 @@ impl<'a> SvcMember<'a> {
 
             // TODO (CM): unify this with other sys
             sys: Cow::Borrowed(&c.sys),
-            alive: c.alive(),
-            suspect: c.suspect(),
-            confirmed: c.confirmed(),
-            departed: c.departed(),
+
+            alive: c.health == Health::Alive,
+            suspect: c.health == Health::Suspect,
+            confirmed: c.health == Health::Confirmed,
+            departed: c.health == Health::Departed,
+
             cfg: Cow::Borrowed(&c.cfg),
         }
 
@@ -289,8 +292,7 @@ impl<'a> Serialize for SvcMember<'a> {
         map.serialize_entry("environment", &self.environment)?;
         map.serialize_entry("org", &self.org)?;
 
-        // TODO (CM): we actually spell it correctly here... it's not "permanent"
-        // TODO (CM): add an "is_persistent" field to make it clear it's a boolean
+        // TODO (CM): add an "is_permanent" field to make it clear it's a boolean
         map.serialize_entry("persistent", &self.persistent)?;
         // TODO (CM): add an "is_leader" field to make it clear it's a boolean
         map.serialize_entry("leader", &self.leader)?;
@@ -459,6 +461,9 @@ mod tests {
 
         schema.validate(&input)
     }
+
+    // TODO (CM): dump a real context, turn it into a file, and have
+    // _that_ be the test
 
     #[test]
     fn test_basic_validation_works() {
@@ -636,8 +641,6 @@ JSON:
         let cfg_data = CfgTestData::new();
         let cfg = Cfg::new(&cfg_data.pkg, None).expect("create config");
 
-
-
         use butterfly::rumor::service::SysInfo;
         let sys_info = SysInfo::new();
 
@@ -665,6 +668,7 @@ JSON:
             suspect: false,
             confirmed: false,
             departed: false,
+            health: Health::Alive,
             cfg: BTreeMap::new(),
         };
         let svc_member_me = SvcMember::from_census_member(&me);

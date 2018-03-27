@@ -504,6 +504,18 @@ pub struct CensusMember {
     pub update_election_is_no_quorum: bool,
     pub update_election_is_finished: bool,
     pub sys: SysInfo,
+
+    // TODO (CM): Skipping serialization to avoid rippling to other
+    // places unnecessarily right now.
+    #[serde(skip_serializing)]
+    pub health: Health,
+
+    // TODO (CM): I think all these four booleans can disappear
+    // now... not sure if their serialization affects anything yet,
+    // though.
+
+    // TODO (CM): making them public until I can completely do away
+    // with creating CensusMembers completely in my context tests
     pub alive: bool,
     pub suspect: bool,
     pub confirmed: bool,
@@ -584,21 +596,22 @@ impl CensusMember {
             Health::Confirmed => self.confirmed = true,
             Health::Departed => self.departed = true,
         }
+        self.health = health
     }
 
     /// Is this member currently considered to be alive or not?
     pub fn alive(&self) -> bool {
-        self.alive
+        self.health == Health::Alive
     }
-    pub fn suspect(&self) -> bool {
-        self.suspect
-    }
-    pub fn confirmed(&self) -> bool {
-        self.confirmed
-    }
-    pub fn departed(&self) -> bool {
-        self.departed
-    }
+    // pub fn suspect(&self) -> bool {
+    //     self.suspect
+    // }
+    // pub fn confirmed(&self) -> bool {
+    //     self.confirmed
+    // }
+    // pub fn departed(&self) -> bool {
+    //     self.departed
+    // }
 }
 
 fn service_group_from_str(sg: &str) -> Result<ServiceGroup, hcore::Error> {

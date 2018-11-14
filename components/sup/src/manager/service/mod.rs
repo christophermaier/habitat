@@ -258,7 +258,10 @@ impl Service {
     /// Create the service path for this package.
     pub fn create_svc_path(&self) -> Result<()> {
         debug!("{}, Creating svc paths", self.service_group);
-        SvcDir::new(&self.pkg).create()
+        let svc_dir = SvcDir::new(&self.pkg);
+        svc_dir.create()?;
+        svc_dir.purge_templated_content()?;
+        Ok(())
     }
 
     fn start(&mut self, launcher: &LauncherCli) {

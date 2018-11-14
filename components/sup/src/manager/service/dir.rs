@@ -83,6 +83,56 @@ impl<'a> SvcDir<'a> {
         Ok(())
     }
 
+    /// Remove all templated content (hooks and configuration) from a
+    /// service directory.
+    ///
+    /// Useful for removing rendered files that may be from older
+    /// versions of a service that have been removed from the current
+    /// version.
+    pub fn purge_templated_content(&self) -> Result<()> {
+        for dir_path in &[
+            fs::svc_config_path(&self.service_name),
+            fs::svc_hooks_path(&self.service_name),
+        ] {
+            debug!(
+                "Purging any old templated content from {}",
+                dir_path.display()
+            );
+            for entry in stdfs::read_dir(dir_path)? {
+                let entry = entry?;
+                if let Ok(file_type) = entry.file_type() {
+                    if file_type.is_file() {
+                        debug!("Purging {:?}", entry.path().display());
+                        stdfs::remove_file(entry.path())?;
+                    } else if file_type.is_dir() {
+                        // This is unexpected; we shouldn't have
+                        // subdirectories down here.
+                        //
+                        // But see
+                        // https://github.com/habitat-sh/habitat/issues/5173
+                        // for a future where we *might*, at which
+                        // point we'd need to traverse the tree.
+                        warn!(
+                            "Not purging {:?}; it is a directory",
+                            entry.path().display()
+                        );
+                    } else if file_type.is_symlink() {
+                        // This is also unexpected and unconventional,
+                        // though perhaps some packages are set up
+                        // this way.
+                        warn!("Not purging {:?}; it is a symlink", entry.path().display());
+                    }
+                } else {
+                    warn!(
+                        "Not purging {:?}; could not determine file type",
+                        entry.path().display()
+                    );
+                }
+            }
+        }
+        Ok(())
+    }
+
     fn create_svc_root(&self) -> Result<()> {
         Self::create_dir_all(fs::svc_path(&self.service_name))
     }

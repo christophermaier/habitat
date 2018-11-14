@@ -21,3 +21,10 @@ mod imp;
 #[cfg(windows)]
 #[path = "windows/mod.rs"]
 mod imp;
+
+#[derive(Debug)]
+pub enum ShutdownMethod {
+    AlreadyExited,
+    GracefulTermination,
+    Killed,
+}

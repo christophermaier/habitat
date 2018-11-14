@@ -14,4 +14,5 @@
 
 pub mod abilities;
 pub mod exec;
+pub mod service;
 pub mod users;

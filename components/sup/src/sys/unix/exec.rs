@@ -13,15 +13,16 @@
 // limitations under the License.
 
 use std::ffi::OsStr;
+use std::io;
 use std::os::unix::process::CommandExt;
 use std::process::{Child, Command, Stdio};
 
-use sys::abilities;
-
-use hcore::os;
+use libc;
 
 use error::{Error, Result};
+use hcore::os;
 use manager::service::Pkg;
+use sys::abilities;
 
 static LOGKEY: &'static str = "EX";
 
@@ -59,6 +60,19 @@ where
             &pkg.svc_user
         );
     }
+
+    cmd.before_exec(|| {
+        // Run in your own process group! This prevents terminal
+        // signals (e.g. ^C) sent to a Supervisor running in the
+        // foreground from being passed down to any running hooks,
+        // which could cause them to terminate prematurely, among
+        // other things.
+        if unsafe { libc::setpgid(0, 0) } == 0 {
+            Ok(())
+        } else {
+            Err(io::Error::last_os_error())
+        }
+    });
 
     Ok(cmd.spawn()?)
 }

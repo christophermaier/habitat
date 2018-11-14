@@ -12,4 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! Encapsulates platform-specific logic to run a service hook script
+//! (with the exception of the `run` hook itself, which is executed by
+//! the Launcher.
+
 pub use sys::exec::*;

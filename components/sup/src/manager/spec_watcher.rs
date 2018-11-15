@@ -44,34 +44,42 @@ pub struct SpecWatcher {
     have_events: Arc<AtomicBool>,
 }
 
-impl SpecWatcher {
-    pub fn run<P>(path: P) -> Result<Self>
-    where
-        P: Into<PathBuf>,
-    {
-        Self::run_with::<RecommendedWatcher, _>(path)
+pub trait MySpecWatcher {
+    // fn run<P>(path: P) -> Result<MySpecWatcher>
+    // where
+    //     P: Into<PathBuf>;
+
+    // TODO (CM): could be a module-level function, perhaps
+    fn spec_files(&self) -> Result<Vec<PathBuf>>;
+
+    // TODO (CM): These two functions seem to be the heart of the thing.
+
+    // Unsure if this is required, really...
+    fn initial_events(&mut self) -> Result<Vec<SpecWatcherEvent>>;
+    fn new_events(
+        &mut self,
+        active_specs: HashMap<String, ServiceSpec>,
+    ) -> Result<Vec<SpecWatcherEvent>>;
+
+    // Not clear that this needs to be part of the actual watcher, either
+    fn specs_from_watch_path<'a>(&self) -> Result<HashMap<String, ServiceSpec>>;
+}
+
+impl MySpecWatcher for SpecWatcher {
+    fn spec_files(&self) -> Result<Vec<PathBuf>> {
+        Ok(
+            glob(&self.watch_path.join(SPEC_FILE_GLOB).display().to_string())?
+                .filter_map(|p| p.ok())
+                .filter(|p| p.is_file())
+                .collect(),
+        )
     }
 
-    pub fn spec_files<T>(watch_path: T) -> Result<Vec<PathBuf>>
-    where
-        T: AsRef<Path>,
-    {
-        Ok(glob(
-            &watch_path
-                .as_ref()
-                .join(SPEC_FILE_GLOB)
-                .display()
-                .to_string(),
-        )?.filter_map(|p| p.ok())
-        .filter(|p| p.is_file())
-        .collect())
-    }
-
-    pub fn initial_events(&mut self) -> Result<Vec<SpecWatcherEvent>> {
+    fn initial_events(&mut self) -> Result<Vec<SpecWatcherEvent>> {
         self.generate_events(HashMap::new())
     }
 
-    pub fn new_events(
+    fn new_events(
         &mut self,
         active_specs: HashMap<String, ServiceSpec>,
     ) -> Result<Vec<SpecWatcherEvent>> {
@@ -82,9 +90,9 @@ impl SpecWatcher {
         }
     }
 
-    pub fn specs_from_watch_path<'a>(&self) -> Result<HashMap<String, ServiceSpec>> {
+    fn specs_from_watch_path<'a>(&self) -> Result<HashMap<String, ServiceSpec>> {
         let mut specs = HashMap::new();
-        for spec_file in Self::spec_files(&self.watch_path)? {
+        for spec_file in self.spec_files()? {
             let spec = match ServiceSpec::from_file(&spec_file) {
                 Ok(s) => s,
                 Err(e) => {
@@ -136,6 +144,25 @@ impl SpecWatcher {
             specs.insert(spec.ident.name.clone(), spec);
         }
         Ok(specs)
+    }
+}
+
+impl SpecWatcher {
+    pub fn new<P>(path: P) -> SpecWatcher
+    where
+        P: Into<PathBuf>,
+    {
+        SpecWatcher {
+            watch_path: path.into(),
+            have_events: Arc::new(AtomicBool::new(false)),
+        }
+    }
+
+    pub fn run<P>(path: P) -> Result<Self>
+    where
+        P: Into<PathBuf>,
+    {
+        Self::run_with::<RecommendedWatcher, _>(path)
     }
 
     fn run_with<W, P>(path: P) -> Result<Self>
@@ -275,7 +302,6 @@ impl SpecWatcher {
 
         Ok(events)
     }
-
 }
 
 #[cfg(test)]
@@ -293,7 +319,7 @@ mod test {
     use notify;
     use tempfile::TempDir;
 
-    use super::{SpecWatcher, SpecWatcherEvent};
+    use super::{MySpecWatcher, SpecWatcher, SpecWatcherEvent};
     use error::Error::*;
     use manager::service::ServiceSpec;
 

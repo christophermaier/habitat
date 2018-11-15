@@ -73,7 +73,7 @@ pub use self::service::{
     Topology, UpdateStrategy,
 };
 use self::service_updater::ServiceUpdater;
-use self::spec_watcher::{SpecWatcher, SpecWatcherEvent};
+use self::spec_watcher::{MySpecWatcher, SpecWatcher, SpecWatcherEvent};
 pub use self::sys::Sys;
 use self::user_config_watcher::UserConfigWatcher;
 use super::feat;
@@ -306,7 +306,10 @@ impl Manager {
         // unload services, though. Right now we watch files on disk and communicate with the
         // Supervisor asynchronously. We need to move to communicating directly with the
         // Supervisor's main loop through IPC.
-        match SpecWatcher::spec_files(&fs_cfg.specs_path) {
+
+        let temp_sw = SpecWatcher::new(&fs_cfg.specs_path);
+
+        match temp_sw.spec_files() {
             Ok(specs) => for spec_file in specs {
                 match ServiceSpec::from_file(&spec_file) {
                     Ok(spec) => {
@@ -1649,6 +1652,20 @@ impl Manager {
 
     fn update_running_services_from_spec_watcher(&mut self) -> Result<()> {
         let mut active_specs = HashMap::new();
+
+        // Instead of marking specs to reload, perhaps we mark specs
+        // to *not* reload, and then filter them out here?
+        //
+        // Or maybe we mark both?
+        //
+        // How does an event for an unrelated spec end up triggering
+        // the restarting one, though?
+        //
+        // Ah, our spec watcher is literally just setting a boolean
+        // when it detects something changing, and then we bring
+        // everything in line with what we expect based on what's in
+        // the directory... which includes the restarting service spec.
+
         for service in self
             .state
             .services

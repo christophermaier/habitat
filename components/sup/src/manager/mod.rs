@@ -723,6 +723,9 @@ impl Manager {
                 let time_to_wait = next_check - now;
                 thread::sleep(time_to_wait.to_std().unwrap());
             }
+            // Stop the ctl gateway; this way we'll stop responding to
+            // user commands as we're trying to shut down.
+            ctl_shutdown_tx.send(()).ok();
         }
     }
 
@@ -1339,13 +1342,19 @@ where
 struct CtlAcceptor {
     rx: ctl_gateway::server::MgrReceiver,
     state: Arc<ManagerState>,
+    shutdown_trigger: oneshot::Receiver<()>,
 }
 
 impl CtlAcceptor {
-    fn new(state: Arc<ManagerState>, rx: ctl_gateway::server::MgrReceiver) -> Self {
+    fn new(
+        state: Arc<ManagerState>,
+        rx: ctl_gateway::server::MgrReceiver,
+        shutdown_trigger: oneshot::Receiver<()>,
+    ) -> Self {
         CtlAcceptor {
             state: state,
             rx: rx,
+            shutdown_trigger: shutdown_trigger,
         }
     }
 }
@@ -1355,17 +1364,27 @@ impl Stream for CtlAcceptor {
     type Error = ();
 
     fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
-        match self.rx.poll() {
-            Ok(Async::Ready(Some(cmd))) => {
-                let task = CtlHandler::new(cmd, self.state.clone());
-                Ok(Async::Ready(Some(task)))
+        match self.shutdown_trigger.poll() {
+            Ok(Async::Ready(())) => {
+                info!("Signal received; stopping CtlAcceptor");
+                Ok(Async::Ready(None))
             }
-            Ok(Async::Ready(None)) => Ok(Async::Ready(None)),
-            Ok(Async::NotReady) => Ok(Async::NotReady),
             Err(e) => {
-                debug!("CtlAcceptor error, {:?}", e);
-                Err(())
+                error!("Error polling CtlAcceptor shutdown trigger: {:?}", e);
+                Ok(Async::Ready(None))
             }
+            Ok(Async::NotReady) => match self.rx.poll() {
+                Ok(Async::Ready(Some(cmd))) => {
+                    let task = CtlHandler::new(cmd, self.state.clone());
+                    Ok(Async::Ready(Some(task)))
+                }
+                Ok(Async::Ready(None)) => Ok(Async::Ready(None)),
+                Ok(Async::NotReady) => Ok(Async::NotReady),
+                Err(e) => {
+                    debug!("CtlAcceptor error, {:?}", e);
+                    Err(())
+                }
+            },
         }
     }
 }

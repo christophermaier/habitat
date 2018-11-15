@@ -399,7 +399,15 @@ impl Future for SrvHandler {
                             }
                             Ok(AsyncSink::NotReady(_)) => return Ok(Async::NotReady),
                             Err(err) => {
-                                warn!("ManagerReceiver err, {:?}", err);
+                                // An error here means that the
+                                // receiving end of this channel went
+                                // away.
+                                //
+                                // Most often, this will be because
+                                // we're in the middle of an orderly
+                                // shutdown and no longer wish to
+                                // process incoming commands.
+                                warn!("ManagerReceiver err: {}", err);
                                 return Err(HandlerError::from(err));
                             }
                         }

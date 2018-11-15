@@ -16,10 +16,15 @@ mod composite_spec;
 pub mod config;
 mod dir;
 pub mod health;
+mod hook_runner;
 pub mod hooks;
 mod package;
+mod spawned_future;
 pub mod spec;
 mod supervisor;
+mod terminator;
+
+use futures::{future, Future, IntoFuture};
 
 use std;
 use std::collections::HashSet;
@@ -53,7 +58,6 @@ use self::hooks::{Hook, HookTable};
 pub use self::package::{Env, Pkg, PkgProxy};
 pub use self::spec::{BindMap, DesiredState, IntoServiceSpec, ServiceBind, ServiceSpec, Spec};
 use self::supervisor::Supervisor;
-use super::ShutdownReason;
 use super::Sys;
 use census::{CensusGroup, CensusRing, ElectionStatus, ServiceFile};
 use error::{Error, Result, SupError};
@@ -281,11 +285,33 @@ impl Service {
         }
     }
 
-    pub fn stop(&mut self, launcher: &LauncherCli, cause: ShutdownReason) {
-        match self.supervisor.stop(launcher, cause) {
-            Ok(_) => self.post_stop(),
-            Err(err) => outputln!(preamble self.service_group, "Service stop failed: {}", err),
-        }
+    /// Return a future that will shut down a service, performing any
+    /// necessary cleanup, and run its post-stop hook, if any.
+    pub fn stop(&self) -> impl Future<Item = (), Error = SupError> {
+        let service_group = self.service_group.clone();
+        let gs = Arc::clone(&self.gateway_state);
+
+        let f = self.supervisor.stop().and_then(move |_| {
+            gs.write()
+                .expect("GatewayState lock is poisoned")
+                .health_check_data
+                .remove(&service_group);
+            Ok(())
+        });
+
+        // eww
+        let service_group_2 = self.service_group.clone();
+        match self.post_stop() {
+            None => future::Either::A(f),
+            Some(hook) => future::Either::B(f.and_then(|_| {
+                hook.into_future()
+                    .map(|_exitvalue| ())
+                    .map_err(|e| e.into())
+            })),
+        }.map_err(move |e| {
+            outputln!(preamble service_group_2, "Service stop failed: {}", e);
+            e
+        })
     }
 
     /// Runs the reconfigure hook if present, otherwise restarts the service.
@@ -616,51 +642,6 @@ impl Service {
         cfg_changed
     }
 
-    /// Replace the package of the running service and restart its system process.
-    pub fn update_package(&mut self, package: PackageInstall, launcher: &LauncherCli) {
-        match Pkg::from_install(package) {
-            Ok(pkg) => {
-                outputln!(preamble self.service_group,
-                            "Updating service {} to {}", self.pkg.ident, pkg.ident);
-                match CfgRenderer::new(&Self::config_root(&pkg, self.config_from.as_ref())) {
-                    Ok(renderer) => self.config_renderer = renderer,
-                    Err(e) => {
-                        outputln!(preamble self.service_group,
-                                  "Failed to load config templates after updating package, {}", e);
-                        return;
-                    }
-                }
-                self.hooks = HookTable::load(
-                    &self.service_group,
-                    &Self::hooks_root(&pkg, self.config_from.as_ref()),
-                    fs::svc_hooks_path(self.service_group.service()),
-                );
-                self.pkg = pkg;
-            }
-            Err(err) => {
-                outputln!(preamble self.service_group,
-                          "Unexpected error while updating package, {}", err);
-                return;
-            }
-        }
-        if let Err(err) = self.supervisor.stop(launcher, ShutdownReason::PkgUpdating) {
-            outputln!(preamble self.service_group,
-                      "Error stopping process while updating package: {}", err);
-        }
-
-        match self.cfg.update_defaults_from_package(&self.pkg) {
-            Ok(maybe_updated) => {
-                self.defaults_updated = maybe_updated;
-            }
-            Err(err) => {
-                outputln!(preamble self.service_group,
-                          "Unexpected error while checking for updated package defaults: {}", err);
-            }
-        }
-
-        self.initialized = false;
-    }
-
     pub fn to_rumor(&self, incarnation: u64) -> ServiceRumor {
         let exported = match self.cfg.to_exported(&self.pkg) {
             Ok(exported) => Some(exported),
@@ -720,21 +701,17 @@ impl Service {
         }
     }
 
-    fn post_stop(&mut self) {
-        if let Some(ref hook) = self.hooks.post_stop {
-            hook.run(
-                &self.service_group,
-                &self.pkg,
-                self.svc_encrypted_password.as_ref(),
-            );
-        }
-
-        &self
-            .gateway_state
-            .write()
-            .expect("GatewayState lock is poisoned")
-            .health_check_data
-            .remove(&self.service_group);
+    // This hook method looks different from all the others because
+    // it's the only one that runs async right now.
+    fn post_stop(&self) -> Option<hook_runner::HookRunner<hooks::PostStopHook>> {
+        self.hooks.post_stop.as_ref().map(|hook| {
+            hook_runner::HookRunner::new(
+                Arc::clone(&hook),
+                self.service_group.clone(),
+                self.pkg.clone(),
+                self.svc_encrypted_password.clone(),
+            )
+        })
     }
 
     pub fn suitability(&self) -> Option<u64> {

@@ -26,8 +26,11 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, ExitStatus};
 use std::result;
 
+use std::sync::{Arc, Mutex};
+
 use hcore::service::ServiceGroup;
 use hcore::{self, crypto};
+
 use serde::{Serialize, Serializer};
 
 use super::{health, Pkg};
@@ -63,8 +66,8 @@ impl Default for ExitCode {
     }
 }
 
-pub trait Hook: fmt::Debug + Sized {
-    type ExitValue: Default;
+pub trait Hook: fmt::Debug + Sized + Send {
+    type ExitValue: Default + fmt::Debug + Send;
 
     fn file_name() -> &'static str;
 
@@ -207,6 +210,10 @@ pub trait Hook: fmt::Debug + Sized {
         };
         let mut hook_output = HookOutput::new(self.stdout_log_path(), self.stderr_log_path());
         hook_output.stream_output::<Self>(service_group, &mut child);
+
+        // Note that we `wait` on non-run hooks, meaning we don't have
+        // to contend with potential zombies, as we do when managing
+        // run hooks (which are the children of the Launcher).
         match child.wait() {
             Ok(status) => self.handle_exit(service_group, &hook_output, &status),
             Err(err) => {
@@ -876,7 +883,9 @@ pub struct HookTable {
     pub run: Option<RunHook>,
     pub post_run: Option<PostRunHook>,
     pub smoke_test: Option<SmokeTestHook>,
-    pub post_stop: Option<PostStopHook>,
+    // This Arc<Mutex<>> business is a possibly-temporary state while
+    // we refactor hooks to be able to run asynchronously.
+    pub post_stop: Option<Arc<Mutex<PostStopHook>>>,
 }
 
 impl HookTable {
@@ -898,7 +907,8 @@ impl HookTable {
                 table.run = RunHook::load(service_group, &hooks_path, &templates);
                 table.post_run = PostRunHook::load(service_group, &hooks_path, &templates);
                 table.smoke_test = SmokeTestHook::load(service_group, &hooks_path, &templates);
-                table.post_stop = PostStopHook::load(service_group, &hooks_path, &templates);
+                table.post_stop = PostStopHook::load(service_group, &hooks_path, &templates)
+                    .map(|h| Arc::new(Mutex::new(h)));
             }
         }
         debug!(
@@ -945,7 +955,8 @@ impl HookTable {
             changed = self.compile_one(hook, service_group, ctx) || changed;
         }
         if let Some(ref hook) = self.post_stop {
-            changed = self.compile_one(hook, service_group, ctx) || changed;
+            let h = hook.lock().expect("post-stop hook lock poisoned");
+            changed = self.compile_one(&*h, service_group, ctx) || changed;
         }
         changed
     }

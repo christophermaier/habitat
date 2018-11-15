@@ -82,6 +82,62 @@ impl SpecWatcher {
         }
     }
 
+    pub fn specs_from_watch_path<'a>(&self) -> Result<HashMap<String, ServiceSpec>> {
+        let mut specs = HashMap::new();
+        for spec_file in Self::spec_files(&self.watch_path)? {
+            let spec = match ServiceSpec::from_file(&spec_file) {
+                Ok(s) => s,
+                Err(e) => {
+                    match e.err {
+                        // If the error is related to loading a `ServiceSpec`, emit a warning
+                        // message and continue on to the next spec file. The best we can do to
+                        // fail-safe is report and skip.
+                        Error::ServiceSpecParse(_) | Error::MissingRequiredIdent => {
+                            outputln!(
+                                "Error when loading service spec file '{}' ({}). \
+                                 This file will be skipped.",
+                                spec_file.display(),
+                                e.description()
+                            );
+                            continue;
+                        }
+                        // All other errors are unexpected and should be dealt with up the calling
+                        // stack.
+                        _ => return Err(e),
+                    }
+                }
+            };
+            let file_stem = match spec_file.file_stem().and_then(OsStr::to_str) {
+                Some(s) => s,
+                None => {
+                    outputln!(
+                        "Error when loading service spec file '{}' \
+                         (File stem could not be determined). \
+                         This file will be skipped.",
+                        spec_file.display()
+                    );
+                    continue;
+                }
+            };
+            if file_stem != &spec.ident.name {
+                outputln!(
+                    "Error when loading service spec file '{}' \
+                     (File name does not match ident name '{}' from ident = \"{}\", \
+                     it should be called '{}.{}'). \
+                     This file will be skipped.",
+                    spec_file.display(),
+                    &spec.ident.name,
+                    &spec.ident,
+                    &spec.ident.name,
+                    SPEC_FILE_EXT
+                );
+                continue;
+            }
+            specs.insert(spec.ident.name.clone(), spec);
+        }
+        Ok(specs)
+    }
+
     fn run_with<W, P>(path: P) -> Result<Self>
     where
         P: Into<PathBuf>,
@@ -220,61 +276,6 @@ impl SpecWatcher {
         Ok(events)
     }
 
-    pub fn specs_from_watch_path<'a>(&self) -> Result<HashMap<String, ServiceSpec>> {
-        let mut specs = HashMap::new();
-        for spec_file in Self::spec_files(&self.watch_path)? {
-            let spec = match ServiceSpec::from_file(&spec_file) {
-                Ok(s) => s,
-                Err(e) => {
-                    match e.err {
-                        // If the error is related to loading a `ServiceSpec`, emit a warning
-                        // message and continue on to the next spec file. The best we can do to
-                        // fail-safe is report and skip.
-                        Error::ServiceSpecParse(_) | Error::MissingRequiredIdent => {
-                            outputln!(
-                                "Error when loading service spec file '{}' ({}). \
-                                 This file will be skipped.",
-                                spec_file.display(),
-                                e.description()
-                            );
-                            continue;
-                        }
-                        // All other errors are unexpected and should be dealt with up the calling
-                        // stack.
-                        _ => return Err(e),
-                    }
-                }
-            };
-            let file_stem = match spec_file.file_stem().and_then(OsStr::to_str) {
-                Some(s) => s,
-                None => {
-                    outputln!(
-                        "Error when loading service spec file '{}' \
-                         (File stem could not be determined). \
-                         This file will be skipped.",
-                        spec_file.display()
-                    );
-                    continue;
-                }
-            };
-            if file_stem != &spec.ident.name {
-                outputln!(
-                    "Error when loading service spec file '{}' \
-                     (File name does not match ident name '{}' from ident = \"{}\", \
-                     it should be called '{}.{}'). \
-                     This file will be skipped.",
-                    spec_file.display(),
-                    &spec.ident.name,
-                    &spec.ident,
-                    &spec.ident.name,
-                    SPEC_FILE_EXT
-                );
-                continue;
-            }
-            specs.insert(spec.ident.name.clone(), spec);
-        }
-        Ok(specs)
-    }
 }
 
 #[cfg(test)]

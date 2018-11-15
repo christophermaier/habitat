@@ -51,6 +51,7 @@ use std::sync::mpsc;
 use api_client;
 use butterfly;
 use common;
+use futures::sync::oneshot;
 use glob;
 use handlebars;
 use hcore;
@@ -154,6 +155,7 @@ pub enum Error {
     NotifyCreateError(notify::Error),
     NotifyError(notify::Error),
     NulError(ffi::NulError),
+    OneshotCanceled(oneshot::Canceled),
     PackageNotFound(package::PackageIdent),
     Permissions(String),
     PidFileCorrupt(PathBuf),
@@ -288,6 +290,7 @@ impl fmt::Display for SupError {
             Error::NotifyCreateError(ref e) => format!("Notify create error: {}", e),
             Error::NotifyError(ref e) => format!("Notify error: {}", e),
             Error::NulError(ref e) => format!("{}", e),
+            Error::OneshotCanceled(ref e) => format!("{}", e),
             Error::PackageNotFound(ref pkg) => {
                 if pkg.fully_qualified() {
                     format!("Cannot find package: {}", pkg)
@@ -426,6 +429,7 @@ impl error::Error for SupError {
             Error::NulError(_) => {
                 "An attempt was made to build a CString with a null byte inside it"
             }
+            Error::OneshotCanceled(ref e) => e.description(),
             Error::PackageNotFound(_) => "Cannot find a package",
             Error::Permissions(_) => "File system permissions error",
             Error::PidFileCorrupt(_) => "Unable to decode contents of PID file",
@@ -589,5 +593,11 @@ impl From<toml::ser::Error> for SupError {
 impl From<protocol::net::NetErr> for SupError {
     fn from(err: protocol::net::NetErr) -> Self {
         sup_error!(Error::NetErr(err))
+    }
+}
+
+impl From<oneshot::Canceled> for SupError {
+    fn from(err: oneshot::Canceled) -> Self {
+        sup_error!(Error::OneshotCanceled(err))
     }
 }

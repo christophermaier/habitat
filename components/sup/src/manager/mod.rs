@@ -31,9 +31,7 @@ use std;
 use std::collections::HashMap;
 use std::fs::{self, File, OpenOptions};
 use std::io::{BufRead, BufReader, Read, Write};
-use std::mem;
 use std::net::SocketAddr;
-use std::ops::DerefMut;
 use std::path::{Path, PathBuf};
 use std::result;
 use std::str::FromStr;
@@ -41,6 +39,7 @@ use std::sync::{Arc, Condvar, Mutex, RwLock};
 use std::thread;
 use std::time::Duration;
 
+use futures::sync::oneshot;
 use num_cpus;
 
 use butterfly;
@@ -81,7 +80,6 @@ use config::{EnvConfig, GossipListenAddr};
 use ctl_gateway::{self, CtlRequest};
 use error::{Error, Result, SupError};
 use http_gateway;
-use ShutdownReason;
 use VERSION;
 
 const MEMBER_ID_FILE: &'static str = "MEMBER_ID";
@@ -97,6 +95,21 @@ pub enum ServiceOperation {
         to_stop: ServiceSpec,
         to_start: ServiceSpec,
     },
+}
+
+/// A Supervisor can stop in a handful of ways.
+#[derive(Copy, Clone, Eq, PartialEq, Debug)]
+enum ShutdownMode {
+    /// When the Supervisor is shutting down for normal reasons and
+    /// should take all services down with it (i.e., it's actually
+    /// shutting down).
+    Normal,
+    /// When the Supervisor has been manually departed from the
+    /// Habitat network. All services should come down, as well.
+    Departed,
+    /// A Supervisor is updating itself, or is otherwise simply
+    /// restarting. Services _do not_ get shut down.
+    Updating, // TODO (CM): perhaps Restarting?
 }
 
 /// FileSystem paths that the Manager uses to persist data to disk.
@@ -223,16 +236,35 @@ pub struct Manager {
     events_group: Option<ServiceGroup>,
     fs_cfg: Arc<FsCfg>,
     launcher: LauncherCli,
-    updater: ServiceUpdater,
+    updater: Arc<Mutex<ServiceUpdater>>,
     peer_watcher: Option<PeerWatcher>,
     spec_watcher: SpecWatcher,
-    user_config_watcher: UserConfigWatcher,
+    // This Arc<RwLock<>> business is a potentially temporary
+    // change. Right now, in order to asynchronously shut down
+    // services, we need to be able to have a safe reference to this
+    // from another thread.
+    //
+    // Future refactorings may suggest other ways to achieve the same
+    // result of being able to manipulate the config watcher from
+    // other threads (e.g., maybe we subscribe to messages to change
+    // the watcher)
+    user_config_watcher: Arc<RwLock<UserConfigWatcher>>,
     spec_dir: SpecDir,
     organization: Option<String>,
     self_updater: Option<SelfUpdater>,
     service_states: HashMap<PackageIdent, Timespec>,
     sys: Arc<Sys>,
     http_disable: bool,
+    /// When we're upgrading a service, we remove it from the
+    /// Supervisor and add it back. Due to the behavior of Futures and
+    /// the current data structures we have, the most straightforward
+    /// thing to do is add the specfile of the service in question to
+    /// this vec after we've successfully shut it down. Once it's
+    /// there, we can act on them in our (non-Tokio-driven) main loop
+    /// to re-load them.
+    ///
+    /// It's a Mutex because we only ever write.
+    specs_to_reload: Arc<Mutex<Vec<PathBuf>>>,
 }
 
 impl Manager {
@@ -333,20 +365,21 @@ impl Manager {
                 gateway_state: Arc::new(RwLock::new(gateway_state)),
             }),
             self_updater: self_updater,
-            updater: ServiceUpdater::new(server.clone()),
+            updater: Arc::new(Mutex::new(ServiceUpdater::new(server.clone()))),
             census_ring: CensusRing::new(sys.member_id.clone()),
             butterfly: server,
             events_group: cfg.eventsrv_group,
             launcher: launcher,
             peer_watcher: peer_watcher,
             spec_watcher: spec_watcher,
-            user_config_watcher: UserConfigWatcher::new(),
+            user_config_watcher: Arc::new(RwLock::new(UserConfigWatcher::new())),
             spec_dir: spec_dir,
             fs_cfg: Arc::new(fs_cfg),
             organization: cfg.organization,
             service_states: HashMap::new(),
             sys: Arc::new(sys),
             http_disable: cfg.http_disable,
+            specs_to_reload: Arc::new(Mutex::new(Vec::new())),
         })
     }
 
@@ -483,7 +516,12 @@ impl Manager {
             self.butterfly.start_election(&service.service_group, 0);
         }
 
-        if let Err(e) = self.user_config_watcher.add(&service) {
+        if let Err(e) = self
+            .user_config_watcher
+            .write()
+            .expect("user-config-watcher lock is poisoned")
+            .add(&service)
+        {
             outputln!(
                 "Unable to start UserConfigWatcher for {}: {}",
                 service.spec_ident,
@@ -492,7 +530,10 @@ impl Manager {
             return;
         }
 
-        self.updater.add(&service);
+        self.updater
+            .lock()
+            .expect("Updater lock poisoned")
+            .add(&service);
         self.state
             .services
             .write()
@@ -508,11 +549,13 @@ impl Manager {
             .expect("Couldn't build Tokio Runtime!");
 
         let (ctl_tx, ctl_rx) = mpsc::unbounded();
-        let ctl_handler = CtlAcceptor::new(self.state.clone(), ctl_rx).for_each(move |handler| {
-            executor::spawn(handler);
-            Ok(())
-        });
-
+        let (ctl_shutdown_tx, ctl_shutdown_rx) = oneshot::channel();
+        let ctl_handler = CtlAcceptor::new(self.state.clone(), ctl_rx, ctl_shutdown_rx).for_each(
+            move |handler| {
+                executor::spawn(handler);
+                Ok(())
+            },
+        );
         runtime.spawn(ctl_handler);
 
         if let Some(svc_load) = svc {
@@ -605,6 +648,7 @@ impl Manager {
             Some(ref evg) => Some(events::EventsMgr::start(evg.clone())),
             None => None,
         };
+
         // On Windows initializng the signal handler will create a ctrl+c handler for the
         // process which will disable default windows ctrl+c behavior and allow us to
         // handle via check_for_signal. However, if the supervsor is in a long running
@@ -616,7 +660,10 @@ impl Manager {
             signals::init();
         }
 
-        loop {
+        // Enter the main Supervisor loop. When we break out, it'll be
+        // because we've been instructed to shutdown. The value we
+        // break out with governs exactly how we shut down.
+        let shutdown_mode = loop {
             if feat::is_enabled(feat::TestExit) {
                 if let Ok(exit_file_path) = env::var("HAB_FEAT_TEST_EXIT") {
                     if let Ok(mut exit_code_file) = File::open(&exit_file_path) {
@@ -635,36 +682,42 @@ impl Manager {
 
             let next_check = time::get_time() + TimeDuration::milliseconds(1000);
             if self.launcher.is_stopping() {
-                self.shutdown(ShutdownReason::LauncherStopping);
-                return Ok(());
+                break ShutdownMode::Normal;
             }
             if self.check_for_departure() {
-                self.shutdown(ShutdownReason::Departed);
-                return Err(sup_error!(Error::Departed));
+                break ShutdownMode::Departed;
             }
             if !feat::is_enabled(feat::IgnoreSignals) {
                 if let Some(SignalEvent::Passthrough(Signal::HUP)) = signals::check_for_signal() {
                     outputln!("Supervisor shutting down for signal");
-                    self.shutdown(ShutdownReason::Signal);
-                    return Ok(());
+                    break ShutdownMode::Updating;
                 }
             }
+
+            self.reload_upgraded_services();
+
             if let Some(package) = self.check_for_updated_supervisor() {
                 outputln!(
                     "Supervisor shutting down for automatic update to {}",
                     package
                 );
-                self.shutdown(ShutdownReason::PkgUpdating);
-                return Ok(());
+                break ShutdownMode::Updating;
             }
 
+            // TODO (CM): I NEED TO RESOLVE THESE TWO CALLS
+            // for f in self.update_running_services_from_spec_watcher()? {
+            //     runtime.spawn(f);
+            // }
             if self.spec_watcher.has_events() {
                 self.take_action_on_services()?;
             }
+            //////////
 
             self.update_peers_from_watch_file()?;
             self.update_running_services_from_user_config_watcher();
-            self.check_for_updated_packages();
+            for f in self.shutdown_services_for_update() {
+                runtime.spawn(f);
+            }
             self.restart_elections();
             self.census_ring.update_from_rumors(
                 &self.butterfly.service_store,
@@ -723,40 +776,136 @@ impl Manager {
                 let time_to_wait = next_check - now;
                 thread::sleep(time_to_wait.to_std().unwrap());
             }
-            // Stop the ctl gateway; this way we'll stop responding to
-            // user commands as we're trying to shut down.
-            ctl_shutdown_tx.send(()).ok();
+        }; // end main loop
+
+        // When we make it down here, we've broken out of the main
+        // Supervisor loop, which means it's time to shut down. Based
+        // on the value we broke out of the loop with, we may need to
+        // shut services down. We do that out here, so we can run the
+        // shutdown futures directly on the reactor, and ensure
+        // they're all driven to completion before we exit.
+
+        // Stop the ctl gateway; this way we'll stop responding to
+        // user commands as we're trying to shut down.
+        ctl_shutdown_tx.send(()).ok();
+
+        match shutdown_mode {
+            ShutdownMode::Updating => {}
+            ShutdownMode::Normal | ShutdownMode::Departed => {
+                outputln!("Gracefully departing from butterfly network.");
+                self.butterfly.set_departed();
+
+                let mut svcs = self
+                    .state
+                    .services
+                    .write()
+                    .expect("Services lock is poisoned!");
+
+                for (_ident, svc) in svcs.drain() {
+                    let f = self.remove_service(svc).map(|_| ()).map_err(|_| ());
+                    runtime.spawn(f);
+                }
+            }
+        };
+
+        // Allow all existing futures to run to completion.
+        runtime
+            .shutdown_on_idle()
+            .wait()
+            .expect("Error waiting on Tokio runtime to shutdown");
+
+        release_process_lock(&self.fs_cfg);
+        self.butterfly.persist_data();
+
+        match shutdown_mode {
+            ShutdownMode::Normal | ShutdownMode::Updating => Ok(()),
+            ShutdownMode::Departed => Err(sup_error!(Error::Departed)),
+        }
+    }
+
+    /// Reload any services that had been removed as a result of being updated.
+    fn reload_upgraded_services(&mut self) {
+        let paths: Vec<PathBuf>;
+        {
+            let mut spec_files = self
+                .specs_to_reload
+                .lock()
+                .expect("specs_to_reload lock poisoned");
+            paths = spec_files.drain(..).collect();
+        }
+
+        for spec_file in paths.into_iter() {
+            match ServiceSpec::from_file(&spec_file) {
+                Ok(mut spec) => {
+                    spec.desired_state = DesiredState::Up;
+                    self.add_service(spec);
+                }
+                Err(e) => error!(
+                    "Failed to reload an upgraded service for spec file '{:?}': {:?}",
+                    spec_file, e
+                ),
+            }
         }
     }
 
     fn check_for_updated_supervisor(&mut self) -> Option<PackageInstall> {
-        if let Some(ref mut updater) = self.self_updater {
-            return updater.updated();
+        if let Some(ref mut self_updater) = self.self_updater {
+            return self_updater.updated();
         }
         None
     }
 
-    /// Walk each service and check if it has an updated package installed via the Update Strategy.
-    /// This updates the Service to point to the new service struct, and then marks it for
-    /// restarting.
+    /// Walk each service and check if it has an updated package
+    /// installed via the Update Strategy.
     ///
-    /// The run loop's last updated census is a required parameter on this function to inform the
-    /// main loop that we, ourselves, updated the service counter when we updated ourselves.
-    fn check_for_updated_packages(&mut self) {
-        for service in self
+    /// Returns a Vec of futures for shutting down those services and
+    /// subsequently queue them up for restart by the manager.
+    ///
+    /// (The futures need to be spawned.)
+    fn shutdown_services_for_update(&mut self) -> Vec<impl Future<Item = (), Error = ()>> {
+        let mut updating_packages = vec![];
+
+        let mut services = self
             .state
             .services
             .write()
-            .expect("Services lock is poisoned!")
-            .values_mut()
-        {
-            if self
-                .updater
-                .check_for_updated_package(service, &self.census_ring, &self.launcher)
+            .expect("Services lock is poisoned!");
+
+        let mut updater = self.updater.lock().expect("Updater lock poisoned");
+
+        for (current_ident, service) in services.iter() {
+            if let Some(new_package_ident) =
+                updater.check_for_updated_package(service, &self.census_ring)
             {
-                self.gossip_latest_service_rumor(&service);
+                outputln!("Updating from {} to {}", current_ident, new_package_ident);
+                updating_packages.push(current_ident.clone());
             }
         }
+
+        updating_packages
+            .into_iter()
+            .map(|current_ident| {
+                // Unwrap is OK because we know that the entry is
+                // present because of what we did above.
+                let service = services.remove(&current_ident).unwrap();
+                let spec_file_path = service.spec_file.clone();
+                let spec_files = Arc::clone(&self.specs_to_reload);
+
+                // TODO (CM): log an error here if we can't remove the service
+                let f = self
+                .remove_service(service)
+                // TODO (CM): should this be `then` rather than `and_then`?
+                .and_then(move |_| {
+                    spec_files
+                        .lock()
+                        .expect("specs_to_reload lock is poisoned")
+                        .push(spec_file_path);
+                    Ok(())
+                }).map_err(|e| {
+                    outputln!("Error shutting down service for update: {:?}", e);
+                });
+                f
+            }).collect()
     }
 
     // Creates a rumor for the specified service.
@@ -896,30 +1045,36 @@ impl Manager {
     }
 
     /// Remove the given service from the manager.
-    ///
-    /// Passing `true` for the term argument will also request the Launcher to terminate the running
-    /// service. Passing a value of `false` will let the Launcher keep the service running. This
-    /// useful if you want the Supervisor to shutdown temporarily and then come back and re-attach
-    /// to all running processes.
-    fn remove_service(&mut self, service: &mut Service, cause: ShutdownReason) {
+    fn remove_service(&self, service: Service) -> impl Future<Item = (), Error = SupError> {
         // JW TODO: Update service rumor to remove service from cluster
-        let term = match cause {
-            ShutdownReason::LauncherStopping | ShutdownReason::SvcStopCmd => true,
-            _ => false,
-        };
+        let user_config_watcher = Arc::clone(&self.user_config_watcher);
+        let updater = Arc::clone(&self.updater);
 
-        if term {
-            service.stop(&self.launcher, cause);
-        }
+        service
+            .stop()
+            // TODO (CM): Stop should emit a message about what's
+            // being stopped.
+            .then(move |_| {
+                // We always want to do this cleanup, even if there
+                // was an error shutting down the service
+                if let Err(e) = user_config_watcher
+                    .write()
+                    .expect("Watcher lock poisoned")
+                    .remove(&service)
+                {
+                    debug!(
+                        "Error stopping user-config watcher thread for service {}: {:?}",
+                        service, e
+                    )
+                }
 
-        if let Err(_) = self.user_config_watcher.remove(service) {
-            debug!(
-                "Error stopping user-config watcher thread for service {}",
-                service
-            );
-        }
-
-        self.updater.remove(service);
+                // Remove service updater
+                updater
+                    .lock()
+                    .expect("Updater lock poisoned")
+                    .remove(&service);
+                Ok(())
+            })
     }
 
     /// Check if any elections need restarting.
@@ -927,73 +1082,33 @@ impl Manager {
         self.butterfly.restart_elections();
     }
 
-    fn shutdown(&mut self, cause: ShutdownReason) {
-        match cause {
-            ShutdownReason::PkgUpdating | ShutdownReason::Signal => {
-                // Previously, we would unconditionally set our health
-                // to departed. However, given our current conflation
-                // of Supervisor reachability and Service health, I
-                // suspect this causes instability when simply
-                // shutting down the Supervisor for a Supervisor
-                // upgrade.
-                //
-                // In the future, we may want to notify the rest of
-                // the network more formally of our intent to update,
-                // but for now, NOT convincing everyone that our
-                // services are gone seems like a good intermediate
-                // step. (We should also, of course, stop conflating
-                // Supervisor reachability and Service health!) Our
-                // existing suspicion mechanism should serve us well
-                // here if it takes longer than expected for the new
-                // Supervisor to come back up.
-                //
-                // Thus, for these given ShutdownReasons, we just
-                // won't send any Membership rumors out.
-            }
-            ShutdownReason::SvcStopCmd => {
-                // Just to call it out specifically, we shouldn't ever
-                // be called with this ShutdownReason.
-                //
-                // This is all being refactored elsewhere right now,
-                // for what it's worth.
-            }
-            ShutdownReason::LauncherStopping | ShutdownReason::Departed => {
-                // On the other hand, if we legitimately are going
-                // away, tell people, even though sending something
-                // out when _we've already been manually departed_ is
-                // perhaps excessive.
-                outputln!("Gracefully departing from butterfly network.");
-                self.butterfly.set_departed();
-            }
-        }
-
-        let mut svcs = HashMap::new();
-
-        // The problem we're trying to work around here by adding this block is that `write`
-        // creates an immutable borrow on `self`, and `self.remove_service` needs `&mut self`.
-        // The solution is to introduce the block to drop the immutable borrow before the call to
-        // `self.remove_service`, and use `mem::swap` to move the services to a variable defined
-        // outside the block while we have the lock.
-        {
-            let mut services = self
-                .state
-                .services
-                .write()
-                .expect("Services lock is poisoned!");
-            mem::swap(services.deref_mut(), &mut svcs);
-        }
-
-        for mut service in svcs.drain().map(|(_ident, service)| service) {
-            self.remove_service(&mut service, cause);
-        }
-        release_process_lock(&self.fs_cfg);
-
-        self.butterfly.persist_data();
-    }
-
     /// Start, stop, or restart services to bring what's running in
     /// line with what our spec files say.
+    // TODO (CM): this should convert events to futures for us to
+    // spawn later.
     fn take_action_on_services(&mut self) -> Result<()> {
+        // =======
+        //         let mut futures = vec![];
+
+        //         for service_event in self.spec_watcher.new_events(active_specs)? {
+        //             match service_event {
+        //                 SpecWatcherEvent::AddService(spec) => {
+        //                     if spec.desired_state == DesiredState::Up {
+        //                         // TODO (CM): Eventually, this will be a
+        //                         // future, and we'll just add it to our vector
+        //                         // of futures to return.
+        //                         //
+        //                         // Until then, we just do it.
+        //                         self.add_service(spec);
+        //                     }
+        //                 }
+        //                 SpecWatcherEvent::RemoveService(spec) => {
+        //                     if let Some(f) = self.remove_service_for_spec(&spec) {
+        //                         futures.push(f);
+        //                     }
+        //                 }
+        // >>>>>>> Update the Manager to shut down services asynchronously
+
         for op in self.reconcile_spec_files()? {
             match op {
                 ServiceOperation::Stop(spec) => {
@@ -1154,30 +1269,46 @@ impl Manager {
             .services
             .write()
             .expect("Services lock is poisoned");
+
         for service in services.values_mut() {
-            if self.user_config_watcher.have_events_for(service) {
+            if self
+                .user_config_watcher
+                .read()
+                .expect("user_config_watcher lock is poisoned")
+                .have_events_for(service)
+            {
                 outputln!("user.toml changes detected for {}", &service.spec_ident);
                 service.user_config_updated = true;
             }
         }
     }
 
-    fn remove_service_for_spec(&mut self, spec: &ServiceSpec) {
+    fn remove_service_for_spec(
+        &mut self,
+        spec: &ServiceSpec,
+    ) -> Option<impl Future<Item = (), Error = ()>> {
         let svc = self
             .state
             .services
             .write()
             .expect("Services lock is poisoned")
             .remove(&spec.ident);
+
         match svc {
-            Some(mut service) => {
-                self.remove_service(&mut service, ShutdownReason::SvcStopCmd);
+            Some(service) => {
+                let spec_ident = spec.ident.clone();
+                let f = self.remove_service(service).map_err(move |e| {
+                    outputln!("Error shutting down {} for removal: {:?}", spec_ident, e);
+                });
+
+                return Some(f);
             }
             None => {
                 outputln!(
                     "Tried to remove service for {} but could not find it running, skipping",
                     &spec.ident
                 );
+                return None;
             }
         }
     }

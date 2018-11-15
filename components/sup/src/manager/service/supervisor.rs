@@ -24,6 +24,8 @@ use std::io::BufReader;
 use std::path::{Path, PathBuf};
 use std::result;
 
+use futures::{future, Future};
+
 use hcore::os::process::{self, Pid};
 #[cfg(unix)]
 use hcore::os::users;
@@ -34,12 +36,13 @@ use serde::{Serialize, Serializer};
 use time::{self, Timespec};
 
 use super::ProcessState;
-use super::ShutdownReason;
-use error::{Error, Result};
+use error::{Error, Result, SupError};
 use fs;
 use manager::service::Pkg;
 #[cfg(unix)]
 use sys::abilities;
+
+use super::terminator;
 
 static LOGKEY: &'static str = "SV";
 
@@ -234,20 +237,30 @@ impl Supervisor {
         (healthy, status)
     }
 
-    pub fn stop(&mut self, launcher: &LauncherCli, cause: ShutdownReason) -> Result<()> {
-        if self.pid.is_none() {
-            return Ok(());
+    /// Returns a future that stops a service asynchronously.
+    pub fn stop(&self) -> impl Future<Item = (), Error = SupError> {
+        // TODO (CM): we should really just keep the service
+        // group around AS a service group
+        let service_group = self.preamble.clone();
+
+        match self.pid {
+            Some(pid) => {
+                let pidfile = self.pid_file.clone();
+
+                future::Either::A(
+                    terminator::terminate_service(pid, service_group)
+                        .and_then(|_shutdown_method| {
+                            Supervisor::cleanup_pidfile_future(pidfile);
+                            Ok(())
+                        }).map_err(|e| e.into()),
+                )
+            }
+            None => {
+                // Not quite sure how we'd get down here without a PID...
+                warn!("Attempted to stop {}, but we have no PID!", service_group);
+                future::Either::B(future::ok(()))
+            }
         }
-        if let ShutdownReason::LauncherStopping = cause {
-            // sending any cmds to launcher will block while it is shutting down
-            // we'll avoid this knowing that launcher will gratuitously kill off
-            // all services as part of its shutdown routine
-        } else {
-            launcher.terminate(self.pid.unwrap())?;
-        }
-        self.cleanup_pidfile();
-        self.change_state(ProcessState::Down);
-        Ok(())
     }
 
     pub fn restart<T>(
@@ -279,7 +292,7 @@ impl Supervisor {
     }
 
     /// Create a PID file for a running service
-    fn create_pidfile(&mut self) -> Result<()> {
+    fn create_pidfile(&self) -> Result<()> {
         match self.pid {
             Some(pid) => {
                 debug!(
@@ -297,12 +310,27 @@ impl Supervisor {
 
     /// Remove a pidfile for this package if it exists.
     /// Do NOT fail if there is an error removing the PIDFILE
-    fn cleanup_pidfile(&mut self) {
+    fn cleanup_pidfile(&self) {
         debug!(
             "Attempting to clean up pid file {}",
             self.pid_file.display()
         );
         match std::fs::remove_file(&self.pid_file) {
+            Ok(_) => debug!("Removed pid file"),
+            Err(e) => debug!("Error removing pidfile: {}, continuing", e),
+        }
+    }
+
+    // This is just a different way to model `cleanup_pidfile` that's
+    // amenable to use in a future. Hopefully these two can be
+    // consolidated in the (ahem) future.
+    fn cleanup_pidfile_future<P>(pidfile: P)
+    where
+        P: AsRef<Path>,
+    {
+        let pidfile = pidfile.as_ref();
+        debug!("Attempting to clean up pid file {}", pidfile.display());
+        match std::fs::remove_file(pidfile) {
             Ok(_) => debug!("Removed pid file"),
             Err(e) => debug!("Error removing pidfile: {}, continuing", e),
         }

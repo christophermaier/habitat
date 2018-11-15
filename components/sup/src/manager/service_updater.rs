@@ -28,7 +28,6 @@ use common::ui::UI;
 use hcore::env as henv;
 use hcore::package::{PackageIdent, PackageInstall, PackageTarget};
 use hcore::service::ServiceGroup;
-use launcher_client::LauncherCli;
 
 use census::CensusRing;
 use config::EnvConfig;
@@ -150,23 +149,27 @@ impl ServiceUpdater {
         }
     }
 
-    /// See if the given service has an update. Returns `true` if a
-    /// new version was installed, thus signalling that the service
-    /// should be restarted
+    /// See if the given service has an update. Returns the identifier
+    /// of the newly-updated service if a new version was installed,
+    /// thus signalling that the service should be restarted.
     pub fn check_for_updated_package(
         &mut self,
-        service: &mut Service,
+        service: &Service,
+        // TODO (CM): Strictly speaking, we don't need to pass
+        // CensusRing down into here, just the census group for our service.
         census_ring: &CensusRing,
-        launcher: &LauncherCli,
-    ) -> bool {
-        let mut updated = false;
+    ) -> Option<PackageIdent> {
+        debug!("Checking for updated package!");
+
+        // TODO (CM): can we do without this?
+        let mut ident = None;
+
         match self.states.get_mut(&service.service_group) {
             Some(&mut UpdaterState::AtOnce(ref mut rx, ref mut kill_tx)) => match rx.try_recv() {
                 Ok(package) => {
-                    service.update_package(package, launcher);
-                    return true;
+                    return Some(package.ident.clone());
                 }
-                Err(TryRecvError::Empty) => return false,
+                Err(TryRecvError::Empty) => return None,
                 Err(TryRecvError::Disconnected) => {
                     debug!("Service Updater worker has died; restarting...");
                     let (ktx, krx) = channel();
@@ -196,7 +199,7 @@ impl ServiceUpdater {
                                 );
                                 *st = RollingState::InElection
                             }
-                            _ => return false,
+                            _ => return None,
                         }
                     } else {
                         debug!("Rolling update, using default suitability");
@@ -220,8 +223,8 @@ impl ServiceUpdater {
                                 *st = RollingState::Follower(FollowerState::Waiting);
                             }
                         }
-                        (Some(_), None) => return false,
-                        _ => return false,
+                        (Some(_), None) => return None,
+                        _ => return None,
                     }
                 }
             }
@@ -230,10 +233,9 @@ impl ServiceUpdater {
                     LeaderState::Polling(ref mut rx, ref mut kill_tx) => match rx.try_recv() {
                         Ok(package) => {
                             debug!("Rolling Update, polling found a new package");
-                            service.update_package(package, launcher);
-                            updated = true;
+                            ident = Some(package.ident.clone());
                         }
-                        Err(TryRecvError::Empty) => return false,
+                        Err(TryRecvError::Empty) => return None,
                         Err(TryRecvError::Disconnected) => {
                             debug!("Service Updater worker has died; restarting...");
                             let (ktx, krx) = channel();
@@ -250,7 +252,7 @@ impl ServiceUpdater {
                                     != census_group.me().unwrap().pkg.as_ref().unwrap()
                             }) {
                                 debug!("Update leader still waiting for followers...");
-                                return false;
+                                return None;
                             }
                             let (kill_tx, kill_rx) = channel();
                             let rx =
@@ -263,7 +265,7 @@ impl ServiceUpdater {
                         ),
                     },
                 }
-                if updated {
+                if ident.is_some() {
                     *state = LeaderState::Waiting;
                 }
             }
@@ -279,11 +281,11 @@ impl ServiceUpdater {
                                 (Some(leader), Some(peer), Some(me)) => {
                                     if leader.pkg == me.pkg {
                                         debug!("We're not in an update");
-                                        return false;
+                                        return None;
                                     }
                                     if leader.pkg != peer.pkg {
                                         debug!("We're in an update but it's not our turn");
-                                        return false;
+                                        return None;
                                     }
                                     debug!("We're in an update and it's our turn");
                                     let (kill_tx, kill_rx) = channel();
@@ -294,7 +296,7 @@ impl ServiceUpdater {
                                     );
                                     *state = FollowerState::Updating(rx, kill_tx);
                                 }
-                                _ => return false,
+                                _ => return None,
                             },
                             None => panic!(
                                 "Expected census list to have service group '{}'!",
@@ -306,10 +308,9 @@ impl ServiceUpdater {
                         match census_ring.census_group_for(&service.service_group) {
                             Some(census_group) => match rx.try_recv() {
                                 Ok(package) => {
-                                    service.update_package(package, launcher);
-                                    updated = true
+                                    ident = Some(package.ident.clone());
                                 }
-                                Err(TryRecvError::Empty) => return false,
+                                Err(TryRecvError::Empty) => return None,
                                 Err(TryRecvError::Disconnected) => {
                                     debug!("Service Updater worker has died; restarting...");
                                     let package = census_group.update_leader().unwrap().pkg.clone();
@@ -329,13 +330,13 @@ impl ServiceUpdater {
                         }
                     }
                 }
-                if updated {
+                if ident.is_some() {
                     *state = FollowerState::Waiting;
                 }
             }
             None => {}
         }
-        updated
+        ident
     }
 }
 
@@ -432,7 +433,7 @@ impl Worker {
     ) -> Receiver<PackageInstall> {
         let (tx, rx) = channel();
         thread::Builder::new()
-            .name(format!("service-updater-{}", sg))
+            .name(format!("SU-{}", sg))
             .spawn(move || match ident {
                 Some(latest) => self.run_once(tx, latest, kill_rx),
                 None => self.run_poll(tx, kill_rx),

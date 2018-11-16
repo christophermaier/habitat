@@ -1,5 +1,6 @@
 use std::error::Error as StdErr;
 use std::ffi::OsStr;
+use std::path::Path;
 use std::path::PathBuf;
 
 use glob::glob;
@@ -10,6 +11,37 @@ use error::{Error, Result};
 static LOGKEY: &'static str = "SD";
 const SPEC_FILE_EXT: &'static str = "spec";
 const SPEC_FILE_GLOB: &'static str = "*.spec";
+
+/// Encapsulate filename-based functionality
+pub struct SpecFile<'a>(&'a Path);
+
+impl<'a> SpecFile<'a> {
+    pub fn new(path: &'a Path) -> SpecFile<'a> {
+        SpecFile(path)
+    }
+
+    pub fn is_spec_for_service<S>(&self, name: S) -> bool
+    where
+        S: AsRef<str>,
+    {
+        match self.service_name() {
+            Some(n) => n == name.as_ref(),
+            None => false,
+        }
+    }
+
+    pub fn service_name(&self) -> Option<&str> {
+        self.0.file_stem().and_then(OsStr::to_str)
+    }
+
+    // TODO (CM): Fold this into the constructor
+    pub fn valid_name(&self) -> bool {
+        match self.0.extension().and_then(OsStr::to_str) {
+            Some(ex) => ex == SPEC_FILE_EXT,
+            None => false,
+        }
+    }
+}
 
 pub struct SpecDir(PathBuf);
 
@@ -26,6 +58,8 @@ impl SpecDir {
         }
         Ok(SpecDir(path))
     }
+
+    // TODO (CM): return SpecFiles instead
 
     /// Return the list of all spec files in the directory
     fn spec_files(&self) -> Vec<PathBuf> {
@@ -129,4 +163,44 @@ impl SpecDir {
 
         Ok(specs)
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    mod spec_file {
+        use super::*;
+
+        #[test]
+        fn service_name_is_derived_from_file_name() {
+            let spec_file = SpecFile::new(Path::new("/hab/sup/default/specs/foo.spec"));
+            assert_eq!(spec_file.service_name(), Some("foo"));
+        }
+
+        #[test]
+        fn can_match_expected_service_name() {
+            let spec_file = SpecFile::new(Path::new("/hab/sup/default/specs/foo.spec"));
+
+            assert!(spec_file.is_spec_for_service("foo"));
+            assert!(!spec_file.is_spec_for_service("bar"));
+        }
+
+        #[test]
+        fn spec_files_should_have_the_correct_extension() {
+            let good_spec_file = SpecFile::new(Path::new("/hab/sup/default/specs/foo.spec"));
+            assert!(
+                good_spec_file.valid_name(),
+                "'spec' is the correct extension for spec files"
+            );
+
+            let bad_spec_file = SpecFile::new(Path::new("/hab/sup/default/specs/foo.doc"));
+            assert!(
+                !bad_spec_file.valid_name(),
+                "'doc' is not the extension for spec files"
+            );
+        }
+
+    }
+
 }

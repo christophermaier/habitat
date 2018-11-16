@@ -74,8 +74,8 @@ pub use self::service::{
     Topology, UpdateStrategy,
 };
 use self::service_updater::ServiceUpdater;
-use self::spec_dir::SpecDir;
-use self::spec_watcher::{MySpecWatcher, SpecWatcher, SpecWatcherEvent};
+use self::spec_dir::{SpecDir, SpecFile};
+use self::spec_watcher::{NewSpecWatcher2 as SpecWatcher, SpecEvent};
 pub use self::sys::Sys;
 use self::user_config_watcher::UserConfigWatcher;
 use super::feat;
@@ -1618,40 +1618,68 @@ impl Manager {
     }
 
     fn update_running_services_from_spec_watcher(&mut self) -> Result<()> {
-        let mut active_specs = HashMap::new();
+        for event in self.spec_watcher.events() {
+            match event {
+                SpecEvent::Added(path) => match ServiceSpec::from_file(&path) {
+                    Ok(spec) => {
+                        if spec.desired_state == DesiredState::Up {
+                            self.add_service(spec);
+                        }
+                    }
+                    Err(e) => {
+                        println!(">>>>>>> e = {:?}", e);
+                    }
+                },
+                SpecEvent::Removed(path) => {
+                    let sf = SpecFile::new(&path);
+                    match sf.service_name() {
+                        Some(name) => {
+                            let spec = {
+                                match self
+                                    .state
+                                    .services
+                                    .read()
+                                    .expect("Services lock is poisoned")
+                                    .iter()
+                                    .find(|(k, v)| k.name() == name)
+                                {
+                                    Some((ident, service)) => service.to_spec(),
+                                    None => {
+                                        println!(">>>>>>> derp");
+                                        continue;
+                                    }
+                                }
+                            };
 
-        // Instead of marking specs to reload, perhaps we mark specs
-        // to *not* reload, and then filter them out here?
-        //
-        // Or maybe we mark both?
-        //
-        // How does an event for an unrelated spec end up triggering
-        // the restarting one, though?
-        //
-        // Ah, our spec watcher is literally just setting a boolean
-        // when it detects something changing, and then we bring
-        // everything in line with what we expect based on what's in
-        // the directory... which includes the restarting service spec.
-
-        for service in self
-            .state
-            .services
-            .read()
-            .expect("Services lock is poisoned!")
-            .values()
-        {
-            let spec = service.to_spec();
-            active_specs.insert(spec.ident.name.clone(), spec);
-        }
-
-        for service_event in self.spec_watcher.new_events(active_specs)? {
-            match service_event {
-                SpecWatcherEvent::AddService(spec) => {
-                    if spec.desired_state == DesiredState::Up {
-                        self.add_service(spec);
+                            if let Err(e) = self.remove_service_for_spec(&spec) {
+                                println!(">>>>>>> derp");
+                            }
+                        }
+                        None => {
+                            println!(">>>>>>> derp");
+                        }
                     }
                 }
-                SpecWatcherEvent::RemoveService(spec) => self.remove_service_for_spec(&spec)?,
+                SpecEvent::Edited(path) => {
+                    match ServiceSpec::from_file(&path) {
+                        Ok(spec) => {
+                            match spec.desired_state {
+                                DesiredState::Up => {
+                                    // queue for restart
+                                }
+                                DesiredState::Down => {
+                                    if let Err(e) = self.remove_service_for_spec(&spec) {
+                                        println!(">>>>>>> oops");
+                                    }
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            println!(">>>>>>> e = {:?}", e);
+                        }
+                    }
+                }
+                SpecEvent::NoOp => {}
             }
         }
 

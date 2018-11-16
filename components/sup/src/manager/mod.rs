@@ -21,6 +21,7 @@ mod peer_watcher;
 mod periodic;
 mod self_updater;
 mod service_updater;
+mod spec_dir;
 mod spec_watcher;
 mod sys;
 mod user_config_watcher;
@@ -73,6 +74,7 @@ pub use self::service::{
     Topology, UpdateStrategy,
 };
 use self::service_updater::ServiceUpdater;
+use self::spec_dir::SpecDir;
 use self::spec_watcher::{MySpecWatcher, SpecWatcher, SpecWatcherEvent};
 pub use self::sys::Sys;
 use self::user_config_watcher::UserConfigWatcher;
@@ -199,6 +201,7 @@ pub struct Manager {
     peer_watcher: Option<PeerWatcher>,
     spec_watcher: SpecWatcher,
     user_config_watcher: UserConfigWatcher,
+    spec_dir: SpecDir,
     organization: Option<String>,
     self_updater: Option<SelfUpdater>,
     service_states: HashMap<PackageIdent, Timespec>,
@@ -401,6 +404,7 @@ impl Manager {
             peer_watcher: peer_watcher,
             spec_watcher: SpecWatcher::run(&fs_cfg.specs_path)?,
             user_config_watcher: UserConfigWatcher::new(),
+            spec_dir: SpecDir::new(&fs_cfg.specs_path)?,
             fs_cfg: Arc::new(fs_cfg),
             organization: cfg.organization,
             service_states: HashMap::new(),
@@ -1441,10 +1445,10 @@ impl Manager {
         }
 
         for loaded in self
-            .spec_watcher
-            .specs_from_watch_path()
-            .unwrap()
-            .values()
+            .spec_dir
+            .specs()
+            .unwrap() // TODO (CM): why unwrap?!
+            .iter()
             .filter(|s| !active_services.contains(&s.ident))
         {
             service_states.insert(loaded.ident.clone(), Timespec::new(0, 0));
@@ -1506,10 +1510,10 @@ impl Manager {
         // These would include stopped persistent services or other
         // persistent services that failed to load
         let watched_services: Vec<Service> = self
-            .spec_watcher
-            .specs_from_watch_path()
-            .unwrap()
-            .values()
+            .spec_dir
+            .specs()
+            .unwrap() // TODO (CM): Why unwrap?!
+            .iter()
             .filter(|spec| !existing_idents.contains(&spec.ident))
             .flat_map(|spec| {
                 Service::load(

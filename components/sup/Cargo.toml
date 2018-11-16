@@ -13,6 +13,11 @@ name = "hab-sup"
 path = "src/main.rs"
 doc = false
 
+[[bin]]
+name = "watcher"
+path = "src/watcher.rs"
+doc = false
+
 [dependencies]
 actix = "*"
 actix-web = { version = "*", default-features = false }
@@ -84,4 +89,3 @@ git = "https://github.com/habitat-sh/core.git"
 [features]
 default = []
 apidocs = []
-

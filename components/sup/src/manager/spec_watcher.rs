@@ -17,13 +17,15 @@ use std::error::Error as StdErr;
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::channel;
-use std::sync::Arc;
+use std::sync::{
+    mpsc::{channel, Receiver},
+    Arc,
+};
 use std::thread;
 use std::time::Duration;
 
 use glob::glob;
-use notify::{RecommendedWatcher, RecursiveMode, Watcher};
+use notify::{DebouncedEvent, RecommendedWatcher, RecursiveMode, Watcher};
 
 use error::{Error, Result};
 use manager::service::ServiceSpec;
@@ -37,6 +39,67 @@ const SPEC_FILE_GLOB: &'static str = "*.spec";
 pub enum SpecWatcherEvent {
     AddService(ServiceSpec),
     RemoveService(ServiceSpec),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SpecEvent {
+    AddedSpec(PathBuf),
+    RemovedSpec(PathBuf),
+    EditedSpec(PathBuf),
+    NoOp,
+}
+
+impl From<DebouncedEvent> for SpecEvent {
+    fn from(event: DebouncedEvent) -> SpecEvent {
+        match event {
+            DebouncedEvent::Create(path) => SpecEvent::AddedSpec(path),
+            DebouncedEvent::Write(path) => SpecEvent::EditedSpec(path),
+            DebouncedEvent::Remove(path) => SpecEvent::RemovedSpec(path),
+            DebouncedEvent::NoticeWrite(_)
+            | DebouncedEvent::NoticeRemove(_)
+            | DebouncedEvent::Chmod(_)
+            | DebouncedEvent::Rename(_, _)
+            | DebouncedEvent::Rescan
+            | DebouncedEvent::Error(_, _) => SpecEvent::NoOp,
+        }
+    }
+}
+
+// TODO (CM): Implement some kind of Debug?
+pub struct NewSpecWatcher2 {
+    watcher: RecommendedWatcher,
+    channel: Receiver<DebouncedEvent>,
+}
+
+impl NewSpecWatcher2 {
+    pub fn run<P>(watch_dir: P) -> Result<NewSpecWatcher2>
+    where
+        P: AsRef<Path>,
+    {
+        if !watch_dir.as_ref().is_dir() {
+            return Err(sup_error!(Error::SpecWatcherDirNotFound(
+                watch_dir.as_ref().display().to_string()
+            )));
+        }
+
+        let (tx, rx) = channel();
+        let mut watcher = RecommendedWatcher::new(tx, Duration::from_millis(WATCHER_DELAY_MS))?;
+        watcher.watch(watch_dir, RecursiveMode::NonRecursive)?;
+
+        Ok(NewSpecWatcher2 {
+            watcher: watcher,
+            channel: rx,
+        })
+    }
+
+    /// Return all relevant spec events since the last time we checked.
+    pub fn events(&self) -> Vec<SpecEvent> {
+        self.channel
+            .try_iter()
+            .map(SpecEvent::from)
+            .filter(|e| *e != SpecEvent::NoOp)
+            .collect()
+    }
 }
 
 pub struct SpecWatcher {
@@ -205,6 +268,12 @@ impl SpecWatcher {
                         return;
                     }
                 };
+
+                // TODO (CM): Note: this call spawns another thread to
+                // do the watching.... wonder if I really need *this*
+                // thread? Maybe I can just make library calls to
+                // try_recv() as many times as I can?
+
                 if let Err(err) = watcher.watch(&watch_path, RecursiveMode::NonRecursive) {
                     outputln!(
                         "SpecWatcher({}) could not start fs watching, ending thread ({})",
@@ -213,6 +282,7 @@ impl SpecWatcher {
                     );
                     return;
                 }
+
                 while let Ok(event) = rx.recv() {
                     debug!(
                         "SpecWatcher({}) file system event: {:?}",

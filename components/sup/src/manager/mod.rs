@@ -666,7 +666,7 @@ impl Manager {
         if let Some(svc_load) = svc {
             Self::service_load(&self.state, &mut CtlRequest::default(), svc_load)?;
         }
-        self.start_initial_services_from_spec_watcher()?;
+        self.start_services()?;
 
         outputln!(
             "Starting gossip-listener on {}",
@@ -1639,16 +1639,11 @@ impl Manager {
         self.butterfly.persist_data();
     }
 
-    fn start_initial_services_from_spec_watcher(&mut self) -> Result<()> {
-        for service_event in self.spec_watcher.initial_events()? {
-            match service_event {
-                SpecWatcherEvent::AddService(spec) => {
-                    if spec.desired_state == DesiredState::Up {
-                        // JW TODO: Should we retry starting services which we failed to add?
-                        self.add_service(spec);
-                    }
-                }
-                _ => warn!("Skipping unexpected watcher event: {:?}", service_event),
+    fn start_services(&mut self) -> Result<()> {
+        for spec in self.spec_dir.specs()? {
+            if spec.desired_state == DesiredState::Up {
+                // JW TODO: Should we retry starting services which we failed to add?
+                self.add_service(spec);
             }
         }
         Ok(())

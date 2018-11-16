@@ -12,34 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
-use std::error::Error as StdErr;
-use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{
-    mpsc::{channel, Receiver},
-    Arc,
-};
-use std::thread;
+use std::sync::mpsc::{channel, Receiver};
 use std::time::Duration;
 
-use glob::glob;
+use super::spec_dir::SpecDir;
+
 use notify::{DebouncedEvent, RecommendedWatcher, RecursiveMode, Watcher};
 
 use error::{Error, Result};
-use manager::service::ServiceSpec;
 
 static LOGKEY: &'static str = "SW";
-const WATCHER_DELAY_MS: u64 = 2_000;
-const SPEC_FILE_EXT: &'static str = "spec";
-const SPEC_FILE_GLOB: &'static str = "*.spec";
 
-// #[derive(Debug, PartialEq)]
-// pub enum SpecWatcherEvent {
-//     AddService(ServiceSpec),
-//     RemoveService(ServiceSpec),
-// }
+// TODO (CM): Expose this as an undocumented environment variable, and
+// use seconds instead
+const WATCHER_DELAY_MS: u64 = 2_000;
 
 // TODO (CM): should be SpecFile, not PathBuf
 // TODO (CM): Alternatively, might go ahead and construct ServiceSpecs
@@ -72,32 +59,20 @@ impl From<DebouncedEvent> for SpecEvent {
 }
 
 // TODO (CM): Implement some kind of Debug?
-pub struct NewSpecWatcher2 {
-    watcher: RecommendedWatcher,
+pub struct SpecWatcher {
+    // Not actually used; only holding onto it for lifetime / Drop purposes.
+    _watcher: RecommendedWatcher,
     channel: Receiver<DebouncedEvent>,
 }
 
-// TODO (CM): Actually, does the watcher become a part of SpecDir?
-// Oooh... SpecDir into WatchedSpecDir?
-
-impl NewSpecWatcher2 {
-    // TODO (CM): take ref to specDir
-    pub fn run<P>(watch_dir: P) -> Result<NewSpecWatcher2>
-    where
-        P: AsRef<Path>,
-    {
-        if !watch_dir.as_ref().is_dir() {
-            return Err(sup_error!(Error::SpecWatcherDirNotFound(
-                watch_dir.as_ref().display().to_string()
-            )));
-        }
-
+impl SpecWatcher {
+    pub fn run(spec_dir: &SpecDir) -> Result<SpecWatcher> {
         let (tx, rx) = channel();
-        let mut watcher = RecommendedWatcher::new(tx, Duration::from_millis(WATCHER_DELAY_MS))?;
-        watcher.watch(watch_dir, RecursiveMode::NonRecursive)?;
-
-        Ok(NewSpecWatcher2 {
-            watcher: watcher,
+        let delay = Duration::from_millis(WATCHER_DELAY_MS)?;
+        let mut watcher = RecommendedWatcher::new(tx, delay)?;
+        watcher.watch(spec_dir, RecursiveMode::NonRecursive)?;
+        Ok(SpecWatcher {
+            _watcher: watcher,
             channel: rx,
         })
     }
@@ -108,6 +83,7 @@ impl NewSpecWatcher2 {
         // one event per file per invocation of this function
         self.channel
             .try_iter()
+            // TODO (CM): use filter_map once we don't have NoOp
             .map(SpecEvent::from)
             .filter(|e| *e != SpecEvent::NoOp)
             .collect()

@@ -74,8 +74,11 @@ pub use self::service::{
     Topology, UpdateStrategy,
 };
 use self::service_updater::ServiceUpdater;
+
+// TODO (CM): consolidate various spec-related stuff into one namespace
 use self::spec_dir::{SpecDir, SpecFile};
-use self::spec_watcher::{NewSpecWatcher2 as SpecWatcher, SpecEvent};
+use self::spec_watcher::{SpecEvent, SpecWatcher};
+
 pub use self::sys::Sys;
 use self::user_config_watcher::UserConfigWatcher;
 use super::feat;
@@ -357,6 +360,8 @@ impl Manager {
         let spec_dir = SpecDir::new(&fs_cfg.specs_path)?;
         spec_dir.migrate_specs();
 
+        let spec_watcher = SpecWatcher::run(&spec_dir)?;
+
         Ok(Manager {
             state: Rc::new(ManagerState {
                 cfg: cfg_static,
@@ -370,7 +375,7 @@ impl Manager {
             events_group: cfg.eventsrv_group,
             launcher: launcher,
             peer_watcher: peer_watcher,
-            spec_watcher: SpecWatcher::run(&fs_cfg.specs_path)?,
+            spec_watcher: spec_watcher,
             user_config_watcher: UserConfigWatcher::new(),
             spec_dir: spec_dir,
             fs_cfg: Arc::new(fs_cfg),

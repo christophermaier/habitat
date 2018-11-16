@@ -45,13 +45,20 @@ impl<'a> SpecFile<'a> {
 
 pub struct SpecDir(PathBuf);
 
+impl AsRef<Path> for SpecDir {
+    fn as_ref(&self) -> &Path {
+        self.0.as_ref()
+    }
+}
+
 impl SpecDir {
     pub fn new<P>(path: P) -> Result<SpecDir>
     where
-        P: Into<PathBuf>,
+        P: AsRef<Path>,
     {
-        let path = path.into();
+        let path: PathBuf = path.as_ref().into();
         if !path.is_dir() {
+            // TODO (CM): not SpecWatcherDir
             return Err(sup_error!(Error::SpecWatcherDirNotFound(
                 path.display().to_string()
             )));

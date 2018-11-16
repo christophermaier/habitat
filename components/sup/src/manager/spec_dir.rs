@@ -36,6 +36,37 @@ impl SpecDir {
             .collect()
     }
 
+    /// Read all spec files and rewrite them to disk migrating their format from a previous
+    /// Supervisor's to the one currently running.
+    pub fn migrate_specs(&self) {
+        // JW: In the future we should write spec files to the Supervisor's DAT file in a more
+        // appropriate machine readable format. We'll need to wait until we modify how we load and
+        // unload services, though. Right now we watch files on disk and communicate with the
+        // Supervisor asynchronously. We need to move to communicating directly with the
+        // Supervisor's main loop through IPC.
+
+        for spec_file in self.spec_files() {
+            match ServiceSpec::from_file(&spec_file) {
+                Ok(spec) => {
+                    if let Err(err) = spec.to_file(&spec_file) {
+                        outputln!(
+                            "Unable to migrate service spec, {}, {}",
+                            spec_file.display(),
+                            err
+                        );
+                    }
+                }
+                Err(err) => {
+                    outputln!(
+                        "Unable to migrate service spec, {}, {}",
+                        spec_file.display(),
+                        err
+                    );
+                }
+            }
+        }
+    }
+
     pub fn specs(&self) -> Result<Vec<ServiceSpec>> {
         let mut specs = vec![];
 

@@ -301,42 +301,6 @@ impl Manager {
         }
     }
 
-    /// Read all spec files and rewrite them to disk migrating their format from a previous
-    /// Supervisor's to the one currently running.
-    fn migrate_specs(fs_cfg: &FsCfg) {
-        // JW: In the future we should write spec files to the Supervisor's DAT file in a more
-        // appropriate machine readable format. We'll need to wait until we modify how we load and
-        // unload services, though. Right now we watch files on disk and communicate with the
-        // Supervisor asynchronously. We need to move to communicating directly with the
-        // Supervisor's main loop through IPC.
-
-        let temp_sw = SpecWatcher::new(&fs_cfg.specs_path);
-
-        match temp_sw.spec_files() {
-            Ok(specs) => for spec_file in specs {
-                match ServiceSpec::from_file(&spec_file) {
-                    Ok(spec) => {
-                        if let Err(err) = spec.to_file(&spec_file) {
-                            outputln!(
-                                "Unable to migrate service spec, {}, {}",
-                                spec_file.display(),
-                                err
-                            );
-                        }
-                    }
-                    Err(err) => {
-                        outputln!(
-                            "Unable to migrate service spec, {}, {}",
-                            spec_file.display(),
-                            err
-                        );
-                    }
-                }
-            },
-            Err(err) => outputln!("Unable to migrate service specs, {}", err),
-        }
-    }
-
     fn new(cfg: ManagerConfig, fs_cfg: FsCfg, launcher: LauncherCli) -> Result<Manager> {
         debug!("new(cfg: {:?}, fs_cfg: {:?}", cfg, fs_cfg);
         let current = PackageIdent::from_str(&format!("{}/{}", SUP_PKG_IDENT, VERSION)).unwrap();
@@ -383,12 +347,16 @@ impl Manager {
             peer.gossip_port = peer_addr.port();
             server.member_list.add_initial_member(peer);
         }
-        Self::migrate_specs(&fs_cfg);
+
         let peer_watcher = if let Some(path) = cfg.watch_peer_file {
             Some(PeerWatcher::run(path)?)
         } else {
             None
         };
+
+        let spec_dir = SpecDir::new(&fs_cfg.specs_path)?;
+        spec_dir.migrate_specs();
+
         Ok(Manager {
             state: Rc::new(ManagerState {
                 cfg: cfg_static,
@@ -404,7 +372,7 @@ impl Manager {
             peer_watcher: peer_watcher,
             spec_watcher: SpecWatcher::run(&fs_cfg.specs_path)?,
             user_config_watcher: UserConfigWatcher::new(),
-            spec_dir: SpecDir::new(&fs_cfg.specs_path)?,
+            spec_dir: spec_dir,
             fs_cfg: Arc::new(fs_cfg),
             organization: cfg.organization,
             service_states: HashMap::new(),

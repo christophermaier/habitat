@@ -76,7 +76,7 @@ pub use self::service::{
 use self::service_updater::ServiceUpdater;
 
 // TODO (CM): consolidate various spec-related stuff into one namespace
-use self::spec_dir::{SpecDir, SpecFile};
+use self::spec_dir::{SpecDir, SpecPath};
 use self::spec_watcher::{SpecEvent, SpecWatcher};
 
 pub use self::sys::Sys;
@@ -1417,6 +1417,9 @@ impl Manager {
             active_services.push(service.spec_ident.clone());
         }
 
+        // TODO (CM): if we're checking for changed services here
+        // anyway, then why even bother with the specwatcher?
+
         for loaded in self
             .spec_dir
             .specs()
@@ -1624,8 +1627,19 @@ impl Manager {
 
     fn update_running_services_from_spec_watcher(&mut self) -> Result<()> {
         for event in self.spec_watcher.events() {
+            trace!("Updating for event {:?}", event);
             match event {
-                SpecEvent::Added(path) => match ServiceSpec::from_file(&path) {
+                // TODO (CM): the way we do things, we'll get an Added
+                // when we modify existing spec files. That means we
+                // might need to restart a service if it has changed.
+                //
+                // Any way to push that into the SpecWatcher?
+                //
+                // Ugh... we get added when we stop a service
+                //
+                // TODO (CM): have ServiceSpec::from_file accept a
+                // SpecPath (or likely, something that implements Path)
+                SpecEvent::Added(spec_path) => match ServiceSpec::from_file(spec_path.as_ref()) {
                     Ok(spec) => {
                         if spec.desired_state == DesiredState::Up {
                             self.add_service(spec);
@@ -1635,42 +1649,49 @@ impl Manager {
                         println!(">>>>>>> e = {:?}", e);
                     }
                 },
-                SpecEvent::Removed(path) => {
-                    let sf = SpecFile::new(&path);
-                    match sf.service_name() {
-                        Some(name) => {
-                            let spec = {
-                                match self
-                                    .state
-                                    .services
-                                    .read()
-                                    .expect("Services lock is poisoned")
-                                    .iter()
-                                    .find(|(k, v)| k.name() == name)
-                                {
-                                    Some((ident, service)) => service.to_spec(),
-                                    None => {
-                                        println!(">>>>>>> derp");
-                                        continue;
-                                    }
+                SpecEvent::Removed(spec_path) => match spec_path.service_name() {
+                    Some(name) => {
+                        let spec = {
+                            match self
+                                .state
+                                .services
+                                .read()
+                                .expect("Services lock is poisoned")
+                                .iter()
+                                .find(|(k, v)| k.name() == name)
+                            {
+                                Some((ident, service)) => service.to_spec(),
+                                None => {
+                                    println!(">>>>>>> derp");
+                                    continue;
                                 }
-                            };
-
-                            if let Err(e) = self.remove_service_for_spec(&spec) {
-                                println!(">>>>>>> derp");
                             }
-                        }
-                        None => {
+                        };
+
+                        if let Err(e) = self.remove_service_for_spec(&spec) {
                             println!(">>>>>>> derp");
                         }
                     }
-                }
-                SpecEvent::Edited(path) => {
-                    match ServiceSpec::from_file(&path) {
+                    None => {
+                        // TODO (CM): This shouldn't happen... pull it
+                        // into the service_name method instead
+                        println!(">>>>>>> derp");
+                    }
+                },
+                SpecEvent::Edited(spec_path) => {
+                    // TODO (CM): This generally won't happen
+                    // normally, but would potentially occur if a user
+                    // manually edits a file.
+                    match ServiceSpec::from_file(spec_path.as_ref()) {
                         Ok(spec) => {
                             match spec.desired_state {
                                 DesiredState::Up => {
-                                    // queue for restart
+                                    // TODO (CM): queue for restart
+
+                                    // TODO (CM): compare existing
+                                    // spec with what would come from
+                                    // the current file?
+                                    println!(">>>>>>> WOULD RESTART {:?}", spec_path);
                                 }
                                 DesiredState::Down => {
                                     if let Err(e) = self.remove_service_for_spec(&spec) {

@@ -322,6 +322,8 @@ impl ServiceSpec {
                 .take(8)
                 .collect::<String>(),
         );
+        // TODO (CM): Note: file does not have ".spec" in it at all
+        println!(">>>>>>> tmpfile = {:?}", tmpfile);
         fs::create_dir_all(dst_path).map_err(|err| {
             sup_error!(Error::ServiceSpecFileIO(path.as_ref().to_path_buf(), err))
         })?;
@@ -332,7 +334,10 @@ impl ServiceSpec {
             let toml = self.to_toml_string()?;
             file.write_all(toml.as_bytes())
                 .map_err(|err| sup_error!(Error::ServiceSpecFileIO(tmpfile.to_path_buf(), err)))?;
+
+            file.flush().expect("flush changes in file");
         }
+        //::std::thread::sleep(::std::time::Duration::from_secs(1));
         fs::rename(&tmpfile, path.as_ref()).map_err(|err| {
             sup_error!(Error::ServiceSpecFileIO(path.as_ref().to_path_buf(), err))
         })?;

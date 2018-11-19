@@ -12,49 +12,91 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::num::ParseIntError;
 use std::path::{Path, PathBuf};
+use std::str::FromStr;
 use std::sync::mpsc::{channel, Receiver};
 use std::time::Duration;
 
-use super::spec_dir::SpecDir;
-
 use notify::{DebouncedEvent, RecommendedWatcher, RecursiveMode, Watcher};
 
+use super::spec_dir::{SpecDir, SpecPath};
+use config::EnvConfig;
 use error::{Error, Result};
 
 static LOGKEY: &'static str = "SW";
 
-// TODO (CM): Expose this as an undocumented environment variable, and
-// use seconds instead
-const WATCHER_DELAY_MS: u64 = 2_000;
+/// How long should we wait to consolidate filesystem events?
+///
+/// This should strike a balance between responsiveness and
+/// too-granular a series of events.
+///
+/// See https://docs.rs/notify/4.0.6/notify/trait.Watcher.html#tymethod.new
+struct SpecWatcherDelay(Duration);
 
-// TODO (CM): should be SpecFile, not PathBuf
-// TODO (CM): Alternatively, might go ahead and construct ServiceSpecs
-// for Added and Edited, and send a SpecFile back for Removed
+impl From<Duration> for SpecWatcherDelay {
+    fn from(d: Duration) -> SpecWatcherDelay {
+        SpecWatcherDelay(d)
+    }
+}
+
+impl Default for SpecWatcherDelay {
+    fn default() -> Self {
+        SpecWatcherDelay(Duration::from_millis(2_000))
+    }
+}
+
+impl FromStr for SpecWatcherDelay {
+    type Err = ParseIntError;
+    fn from_str(s: &str) -> ::std::result::Result<Self, Self::Err> {
+        // u16 ~= 65 seconds, which is _more_ than enough
+        let raw = s.parse::<u16>()?;
+        Ok(Duration::from_secs(raw as u64).into())
+    }
+}
+
+impl EnvConfig for SpecWatcherDelay {
+    const ENVVAR: &'static str = "HAB_SPEC_WATCHER_DELAY_MS";
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SpecEvent {
-    Added(PathBuf),
-    Removed(PathBuf),
-    Edited(PathBuf),
+    Added(SpecPath),
+    Removed(SpecPath),
+    Edited(SpecPath),
     NoOp,
 }
 
 // TODO (CM): would prefer TryFrom... NoOp doesn't really need to be
 // in here. Nothing outside of this module needs to know about NoOp
 impl From<DebouncedEvent> for SpecEvent {
-    fn from(event: DebouncedEvent) -> SpecEvent {
-        match event {
-            DebouncedEvent::Create(path) => SpecEvent::Added(path),
-            DebouncedEvent::Write(path) => SpecEvent::Edited(path),
-            DebouncedEvent::Remove(path) => SpecEvent::Removed(path),
+    fn from(debounced_event: DebouncedEvent) -> SpecEvent {
+        trace!("Processing debounced_event: {:?}", debounced_event,);
+        let spec_event = match debounced_event {
+            DebouncedEvent::Create(path) => SpecPath::new(path)
+                .map(|sf| SpecEvent::Added(sf))
+                .unwrap_or(SpecEvent::NoOp),
+            DebouncedEvent::Write(path) => SpecPath::new(path)
+                .map(|sf| SpecEvent::Edited(sf))
+                .unwrap_or(SpecEvent::NoOp),
+            DebouncedEvent::Remove(path) => SpecPath::new(path)
+                .map(|sf| SpecEvent::Removed(sf))
+                .unwrap_or(SpecEvent::NoOp),
+            DebouncedEvent::Rename(from, to) => {
+                // TODO (CM): doesn't look like we're picking up
+                // rename events for our temp files
+                println!(">>>>>>> renamed {:?} to {:?}", from, to);
+                SpecEvent::NoOp
+            }
+
             DebouncedEvent::NoticeWrite(_)
             | DebouncedEvent::NoticeRemove(_)
             | DebouncedEvent::Chmod(_)
-            | DebouncedEvent::Rename(_, _)
             | DebouncedEvent::Rescan
             | DebouncedEvent::Error(_, _) => SpecEvent::NoOp,
-        }
+        };
+        trace!("--> Processed to spec event: {:?}", spec_event);
+        spec_event
     }
 }
 
@@ -66,10 +108,18 @@ pub struct SpecWatcher {
 }
 
 impl SpecWatcher {
+    /// Start up a separate thread to listen for filesystem
+    /// events.
     pub fn run(spec_dir: &SpecDir) -> Result<SpecWatcher> {
         let (tx, rx) = channel();
-        let delay = Duration::from_millis(WATCHER_DELAY_MS)?;
-        let mut watcher = RecommendedWatcher::new(tx, delay)?;
+        let delay = SpecWatcherDelay::configured_value();
+        let mut watcher = RecommendedWatcher::new(tx, delay.0)?;
+
+        // TODO (CM): why aren't we getting events for temp files in
+        // here? I'm only seeing CREATE events for edited files. If we
+        // could get renames, then this would work out OK.
+        //
+        // Also noticing a lot of sensitivity to the duration I pass in.
         watcher.watch(spec_dir, RecursiveMode::NonRecursive)?;
         Ok(SpecWatcher {
             _watcher: watcher,
@@ -79,6 +129,7 @@ impl SpecWatcher {
 
     /// Return all relevant spec events since the last time we checked.
     pub fn events(&self) -> Vec<SpecEvent> {
+        trace!("Asking for spec events");
         // TODO (CM): should deduplicate these... probably only want
         // one event per file per invocation of this function
         self.channel

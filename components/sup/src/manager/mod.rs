@@ -27,7 +27,7 @@ mod sys;
 mod user_config_watcher;
 
 use std;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt;
 use std::fs::{self, File, OpenOptions};
 use std::io::{BufRead, BufReader, Read, Write};
@@ -97,6 +97,7 @@ const PROC_LOCK_FILE: &'static str = "LOCK";
 
 static LOGKEY: &'static str = "MR";
 
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ServiceOperation {
     Start(ServiceSpec),
     Stop(ServiceSpec),
@@ -1635,26 +1636,45 @@ impl Manager {
         Ok(())
     }
 
-    /// Harmonize the specs on disk with those of the
-    /// currently-running services.
     fn reconcile_spec_files(&mut self) -> Result<Vec<ServiceOperation>> {
-        let mut currently_running = self
+        let currently_running_specs = self
             .state
             .services
             .read()
             .expect("Services lock is poisoned")
             .values()
-            .map(|s| {
-                let spec = s.to_spec();
-                (spec.ident.clone(), spec)
-            }).collect::<HashMap<_, _>>();
+            .map(|s| s.to_spec())
+            .collect::<Vec<_>>();
 
-        let current_specs = self
-            .spec_dir
-            .specs()?
+        let specs_on_disk = self.spec_dir.specs()?;
+
+        Ok(Self::reconcile_spec_files_2(
+            currently_running_specs,
+            specs_on_disk,
+        ))
+    }
+
+    /// Harmonize the specs on disk with those of the
+    /// currently-running services.
+    fn reconcile_spec_files_2<C, D>(
+        currently_running_specs: C,
+        specs_on_disk: D,
+    ) -> Vec<ServiceOperation>
+    where
+        C: IntoIterator<Item = ServiceSpec>,
+        D: IntoIterator<Item = ServiceSpec>,
+    {
+        // Using BTreeMaps to get consistent ordering... mainly useful
+        // for deterministic testing
+        let mut currently_running = currently_running_specs
             .into_iter()
             .map(|s| (s.ident.clone(), s))
-            .collect::<HashMap<_, _>>();
+            .collect::<BTreeMap<_, _>>();
+
+        let current_specs = specs_on_disk
+            .into_iter()
+            .map(|s| (s.ident.clone(), s))
+            .collect::<BTreeMap<_, _>>();
 
         let mut operations = vec![];
         for (ident, current_spec) in current_specs.into_iter() {
@@ -1692,9 +1712,7 @@ impl Manager {
             debug!("Reconciliation: '{}' queued for shutdown", ident);
             operations.push(ServiceOperation::Stop(spec));
         }
-        Ok(operations)
-        // TODO (CM): wrangle all the ? and non-? functions to do the
-        // right thing.
+        operations
     }
 
     fn update_running_services_from_spec_watcher(&mut self) -> Result<()> {
@@ -2097,5 +2115,178 @@ mod test {
         let path = cfg.sup_root();
 
         assert_eq!(PathBuf::from("/tmp/partay"), path);
+    }
+
+    mod reconciliation {
+        use super::super::*;
+
+        fn new_spec(ident: &str) -> ServiceSpec {
+            ServiceSpec::default_for(
+                PackageIdent::from_str(ident).expect("couldn't parse ident str"),
+            )
+        }
+
+        #[test]
+        fn no_specs_yield_no_changes() {
+            assert!(Manager::reconcile_spec_files_2(vec![], vec![]).is_empty());
+        }
+
+        /// If all the currently running services match all the
+        /// current specs, we shouldn't have anything to change.
+        #[test]
+        fn identical_specs_yield_no_changes() {
+            let specs = vec![new_spec("core/foo"), new_spec("core/bar")];
+            assert!(Manager::reconcile_spec_files_2(specs.clone(), specs.clone()).is_empty());
+        }
+
+        #[test]
+        fn missing_spec_on_disk_means_stop() {
+            let running = vec![new_spec("core/foo")];
+            let on_disk = vec![];
+
+            let operations = Manager::reconcile_spec_files_2(running, on_disk);
+            assert_eq!(operations.len(), 1);
+            assert_eq!(operations[0], ServiceOperation::Stop(new_spec("core/foo")));
+        }
+
+        #[test]
+        fn missing_active_spec_means_start() {
+            let running = vec![];
+            let on_disk = vec![new_spec("core/foo")];
+
+            let operations = Manager::reconcile_spec_files_2(running, on_disk);
+            assert_eq!(operations.len(), 1);
+            assert_eq!(operations[0], ServiceOperation::Start(new_spec("core/foo")));
+        }
+
+        #[test]
+        fn down_spec_on_disk_means_stop_running_service() {
+            let spec = new_spec("core/foo");
+
+            let running = vec![spec.clone()];
+
+            let down_spec = {
+                let mut s = spec.clone();
+                s.desired_state = DesiredState::Down;
+                s
+            };
+
+            let on_disk = vec![down_spec];
+
+            let operations = Manager::reconcile_spec_files_2(running, on_disk);
+            assert_eq!(operations.len(), 1);
+            assert_eq!(operations[0], ServiceOperation::Stop(spec));
+        }
+
+        #[test]
+        fn down_spec_on_disk_with_no_running_service_yields_no_changes() {
+            let running = vec![];
+            let down_spec = {
+                let mut s = new_spec("core/foo");
+                s.desired_state = DesiredState::Down;
+                s
+            };
+            let on_disk = vec![down_spec];
+
+            let operations = Manager::reconcile_spec_files_2(running, on_disk);
+            assert!(operations.is_empty());
+        }
+
+        #[test]
+        fn modified_spec_on_disk_means_restart() {
+            let running_spec = new_spec("core/foo");
+
+            let on_disk_spec = {
+                let mut s = running_spec.clone();
+                s.update_strategy = UpdateStrategy::AtOnce;
+                s
+            };
+            assert_ne!(running_spec.update_strategy, on_disk_spec.update_strategy);
+
+            let running = vec![running_spec];
+            let on_disk = vec![on_disk_spec];
+
+            let operations = Manager::reconcile_spec_files_2(running, on_disk);
+            assert_eq!(operations.len(), 1);
+
+            match operations[0] {
+                ServiceOperation::Restart(ref old, ref new) => {
+                    assert_eq!(old.ident, new.ident);
+                    assert_eq!(old.update_strategy, UpdateStrategy::None);
+                    assert_eq!(new.update_strategy, UpdateStrategy::AtOnce);
+                }
+                ref other => {
+                    panic!("Should have been a restart operation: got {:?}", other);
+                }
+            }
+        }
+
+        #[test]
+        fn multiple_operations_can_be_determined_at_once() {
+            // Nothing should happen with this; it's already how it
+            // needs to be.
+            let svc_1_running = new_spec("core/foo");
+            let svc_1_on_disk = svc_1_running.clone();
+
+            // Should get shut down.
+            let svc_2_running = new_spec("core/bar");
+            let svc_2_on_disk = {
+                let mut s = svc_2_running.clone();
+                s.desired_state = DesiredState::Down;
+                s
+            };
+
+            // Should get restarted.
+            let svc_3_running = new_spec("core/baz");
+            let svc_3_on_disk = {
+                let mut s = svc_3_running.clone();
+                s.update_strategy = UpdateStrategy::AtOnce;
+                s
+            };
+
+            // Nothing should happen with this; it's already down.
+            let svc_4_on_disk = {
+                let mut s = new_spec("core/quux");
+                s.desired_state = DesiredState::Down;
+                s
+            };
+
+            // This should get started
+            let svc_5_on_disk = new_spec("core/wat");
+
+            // This should get shut down
+            let svc_6_running = new_spec("core/lolwut");
+
+            let running = vec![
+                svc_1_running.clone(),
+                svc_2_running.clone(),
+                svc_3_running.clone(),
+                svc_6_running.clone(),
+            ];
+
+            let on_disk = vec![
+                svc_1_on_disk.clone(),
+                svc_2_on_disk.clone(),
+                svc_3_on_disk.clone(),
+                svc_4_on_disk.clone(),
+                svc_5_on_disk.clone(),
+            ];
+
+            let operations = Manager::reconcile_spec_files_2(running, on_disk);
+
+            // NB: ordering is currently dependent on the order that
+            // on_disk vec is processed; we take care of that
+            // manually, since there's otherwise not much use for
+            // implementing `Ord` on `ServiceOperation`, et al.
+            let expected_operations = vec![
+                ServiceOperation::Stop(svc_2_running.clone()),
+                ServiceOperation::Restart(svc_3_running.clone(), svc_3_on_disk.clone()),
+                ServiceOperation::Start(svc_5_on_disk.clone()),
+                ServiceOperation::Stop(svc_6_running.clone()),
+            ];
+
+            assert_eq!(expected_operations, operations);
+        }
+
     }
 }

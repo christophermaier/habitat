@@ -26,8 +26,6 @@ use super::spec_dir::SpecDir;
 use config::EnvConfig;
 use error::Result;
 
-// static LOGKEY: &'static str = "SW";
-
 /// How long should we wait to consolidate filesystem events?
 ///
 /// This should strike a balance between responsiveness and
@@ -53,7 +51,7 @@ impl FromStr for SpecWatcherDelay {
     fn from_str(s: &str) -> ::std::result::Result<Self, Self::Err> {
         // u16 ~= 65 seconds, which is _more_ than enough
         let raw = s.parse::<u16>()?;
-        Ok(Duration::from_secs(raw as u64).into())
+        Ok(Duration::from_millis(raw as u64).into())
     }
 }
 
@@ -61,48 +59,10 @@ impl EnvConfig for SpecWatcherDelay {
     const ENVVAR: &'static str = "HAB_SPEC_WATCHER_DELAY_MS";
 }
 
-// #[derive(Debug, Clone, PartialEq, Eq)]
-// pub enum SpecEvent {
-//     Added(SpecPath),
-//     Removed(SpecPath),
-//     Edited(SpecPath),
-//     NoOp,
-// }
+// TODO (CM): Instead of having a separate SpecWatcher, what if we
+// folded this into SpecDir itself?
 
-// // TODO (CM): would prefer TryFrom... NoOp doesn't really need to be
-// // in here. Nothing outside of this module needs to know about NoOp
-// impl From<DebouncedEvent> for SpecEvent {
-//     fn from(debounced_event: DebouncedEvent) -> SpecEvent {
-//         trace!("Processing debounced_event: {:?}", debounced_event,);
-//         let spec_event = match debounced_event {
-//             DebouncedEvent::Create(path) => SpecPath::new(path)
-//                 .map(|sf| SpecEvent::Added(sf))
-//                 .unwrap_or(SpecEvent::NoOp),
-//             DebouncedEvent::Write(path) => SpecPath::new(path)
-//                 .map(|sf| SpecEvent::Edited(sf))
-//                 .unwrap_or(SpecEvent::NoOp),
-//             DebouncedEvent::Remove(path) => SpecPath::new(path)
-//                 .map(|sf| SpecEvent::Removed(sf))
-//                 .unwrap_or(SpecEvent::NoOp),
-//             DebouncedEvent::Rename(from, to) => {
-//                 // TODO (CM): doesn't look like we're picking up
-//                 // rename events for our temp files
-//                 println!(">>>>>>> renamed {:?} to {:?}", from, to);
-//                 SpecEvent::NoOp
-//             }
-
-//             DebouncedEvent::NoticeWrite(_)
-//             | DebouncedEvent::NoticeRemove(_)
-//             | DebouncedEvent::Chmod(_)
-//             | DebouncedEvent::Rescan
-//             | DebouncedEvent::Error(_, _) => SpecEvent::NoOp,
-//         };
-//         trace!("--> Processed to spec event: {:?}", spec_event);
-//         spec_event
-//     }
-// }
-
-// TODO (CM): Implement some kind of Debug?
+// TODO (CM): Implement Debug?
 pub struct SpecWatcher {
     // Not actually used; only holding onto it for lifetime / Drop purposes.
     _watcher: RecommendedWatcher,
@@ -126,40 +86,31 @@ impl SpecWatcher {
         // simplify this.
 
         // TODO (CM): remove all the expects in this
-        // TODO (CM): more tightly constrain this "oneshot" paradigm
-
-        // os == "oneshot"
-        let (os_tx, os_rx) = channel();
-        let handle = Builder::new()
+        let (tx, rx) = channel();
+        Builder::new()
             .name(String::from("spec-watcher"))
             .spawn(move || {
-                let (tx, rx) = channel();
+                let (event_tx, event_rx) = channel();
                 let delay = SpecWatcherDelay::configured_value();
-                let mut watcher = RecommendedWatcher::new(tx, delay.0).expect("lol");
-
-                // TODO (CM): why aren't we getting events for temp files in
-                // here? I'm only seeing CREATE events for edited files. If we
-                // could get renames, then this would work out OK.
-                //
-                // Also noticing a lot of sensitivity to the duration I pass in.
+                let mut watcher = RecommendedWatcher::new(event_tx, delay.0).expect("lol");
                 watcher
                     .watch(spec_dir, RecursiveMode::NonRecursive)
                     .expect("lulz");
                 let sw = SpecWatcher {
                     _watcher: watcher,
-                    channel: rx,
+                    channel: event_rx,
                 };
+                tx.send(sw).expect("Could not send SpecWatcher");
+            })?.join()
+            .expect("whee");
 
-                os_tx.send(sw);
-            })?;
-
-        handle.join().expect("whee");
-
-        // TODO (CM): recv_timeout
-        Ok(os_rx.recv()?)
+        Ok(rx.recv()?)
+        // There's no way this should take 10 seconds
+        //Ok(rx.recv_timeout(Duration::from_secs(10))?)
     }
 
-    /// Return all relevant spec events since the last time we checked.
+    /// Returns `true` if any filesystem events were detected in the
+    /// watched directory.
     pub fn has_events(&self) -> bool {
         trace!("Asking for spec events");
         // TODO (CM): Could filter the events for those that only
@@ -168,269 +119,139 @@ impl SpecWatcher {
     }
 }
 
-// pub struct SpecWatcher {
-//     watch_path: PathBuf,
-//     have_events: Arc<AtomicBool>,
-// }
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::{
+        fs::File,
+        io::{Error as IoError, Write},
+        result::Result as StdResult,
+        thread,
+    };
+    use tempfile::TempDir;
 
-// pub trait MySpecWatcher {
-//     // fn run<P>(path: P) -> Result<MySpecWatcher>
-//     // where
-//     //     P: Into<PathBuf>;
+    locked_env_var!(HAB_SPEC_WATCHER_DELAY_MS, lock_delay_var);
 
-//     // TODO (CM): could be a module-level function, perhaps
-//     fn spec_files(&self) -> Result<Vec<PathBuf>>;
+    fn file_with_content<C>(dir: &TempDir, filename: &str, contents: C) -> StdResult<(), IoError>
+    where
+        C: Into<String>,
+    {
+        let path = dir.path().join(filename);
+        let mut buffer = File::create(&path)?;
+        buffer.write_all(contents.into().as_bytes())
+    }
 
-//     // TODO (CM): These two functions seem to be the heart of the thing.
+    /// Sleep for the currently-configured debounce interval, plus a
+    /// few milliseconds more, just to be certain our filesystem
+    /// events have had plenty of time to process.
+    fn wait_for_debounce_interval() {
+        thread::sleep(SpecWatcherDelay::configured_value().0 + Duration::from_millis(2));
+    }
 
-//     fn new_events(
-//         &mut self,
-//         active_specs: HashMap<String, ServiceSpec>,
-//     ) -> Result<Vec<SpecWatcherEvent>>;
-// }
+    #[test]
+    fn can_be_created() {
+        let _delay = lock_delay_var();
 
-// impl MySpecWatcher for SpecWatcher {
-//     fn spec_files(&self) -> Result<Vec<PathBuf>> {
-//         Ok(
-//             glob(&self.watch_path.join(SPEC_FILE_GLOB).display().to_string())?
-//                 .filter_map(|p| p.ok())
-//                 .filter(|p| p.is_file())
-//                 .collect(),
-//         )
-//     }
+        let dir = TempDir::new().expect("Could not create directory");
+        let spec_dir = SpecDir::new(dir.path()).expect("Couldn't make SpecDir");
+        assert!(
+            SpecWatcher::run(spec_dir).is_ok(),
+            "Couldn't create a SpecWatcher!"
+        );
+    }
 
-//     fn new_events(
-//         &mut self,
-//         active_specs: HashMap<String, ServiceSpec>,
-//     ) -> Result<Vec<SpecWatcherEvent>> {
-//         if self.have_fs_events() {
-//             self.generate_events(active_specs)
-//         } else {
-//             Ok(vec![])
-//         }
-//     }
-// }
+    #[test]
+    fn can_get_events_for_spec_files() {
+        let _delay = lock_delay_var();
 
-// impl SpecWatcher {
-//     pub fn new<P>(path: P) -> SpecWatcher
-//     where
-//         P: Into<PathBuf>,
-//     {
-//         SpecWatcher {
-//             watch_path: path.into(),
-//             have_events: Arc::new(AtomicBool::new(false)),
-//         }
-//     }
+        let dir = TempDir::new().expect("Could not create directory");
+        let spec_dir = SpecDir::new(dir.path()).expect("Couldn't make SpecDir");
+        let sw = SpecWatcher::run(spec_dir).expect("Couldn't create a SpecWatcher!");
 
-//     pub fn run<P>(path: P) -> Result<Self>
-//     where
-//         P: Into<PathBuf>,
-//     {
-//         Self::run_with::<RecommendedWatcher, _>(path)
-//     }
+        assert!(!sw.has_events(), "There should be no events to start");
 
-//     fn run_with<W, P>(path: P) -> Result<Self>
-//     where
-//         P: Into<PathBuf>,
-//         W: Watcher,
-//     {
-//         let path = path.into();
-//         if !path.is_dir() {
-//             return Err(sup_error!(Error::SpecWatcherDirNotFound(
-//                 path.display().to_string()
-//             )));
-//         }
-//         let have_events = Arc::new(AtomicBool::new(false));
-//         Self::setup_watcher::<W>(path.clone(), have_events.clone())?;
+        file_with_content(&dir, "foo.spec", "fooooooo").expect("couldn't create file");
 
-//         Ok(SpecWatcher {
-//             watch_path: path,
-//             have_events: have_events,
-//         })
-//     }
+        assert!(
+            !sw.has_events(),
+            "Need to allow for the debounce interval to pass before you can expect events"
+        );
 
-//     fn setup_watcher<W>(watch_path: PathBuf, have_events: Arc<AtomicBool>) -> Result<()>
-//     where
-//         W: Watcher,
-//     {
-//         thread::Builder::new()
-//             .name(format!("spec-watcher-{}", watch_path.display()))
-//             .spawn(move || {
-//                 debug!("SpecWatcher({}) thread starting", watch_path.display());
-//                 let (tx, rx) = channel();
-//                 let mut watcher = match W::new(tx, Duration::from_millis(WATCHER_DELAY_MS)) {
-//                     Ok(w) => w,
-//                     Err(err) => {
-//                         outputln!(
-//                             "SpecWatcher({}) could not start notifier, ending thread ({})",
-//                             watch_path.display(),
-//                             err
-//                         );
-//                         return;
-//                     }
-//                 };
+        wait_for_debounce_interval();
 
-//                 // TODO (CM): Note: this call spawns another thread to
-//                 // do the watching.... wonder if I really need *this*
-//                 // thread? Maybe I can just make library calls to
-//                 // try_recv() as many times as I can?
+        assert!(sw.has_events(), "There should be an event now");
+        assert!(
+            !sw.has_events(),
+            "Should be no more events after you've checked"
+        );
+    }
 
-//                 if let Err(err) = watcher.watch(&watch_path, RecursiveMode::NonRecursive) {
-//                     outputln!(
-//                         "SpecWatcher({}) could not start fs watching, ending thread ({})",
-//                         watch_path.display(),
-//                         err
-//                     );
-//                     return;
-//                 }
+    /// Currently, the spec watcher will respond to changes to any
+    /// file in the directory, whether it's a `*.spec` file or not.
+    ///
+    /// This would, for instance, pick up the temp files that
+    /// operations like `hab svc stop` lay down before renaming them
+    /// to their final `*.spec` form.
+    #[test]
+    fn can_get_events_for_non_spec_files() {
+        let _delay = lock_delay_var();
 
-//                 while let Ok(event) = rx.recv() {
-//                     debug!(
-//                         "SpecWatcher({}) file system event: {:?}",
-//                         watch_path.display(),
-//                         event
-//                     );
-//                     have_events.store(true, Ordering::Relaxed);
-//                 }
-//                 outputln!(
-//                     "SpecWatcher({}) fs watching died, restarting thread",
-//                     watch_path.display()
-//                 );
-//                 drop(watcher);
-//                 Self::setup_watcher::<W>(watch_path.clone(), have_events.clone()).unwrap();
-//             })?;
-//         Ok(())
-//     }
+        let dir = TempDir::new().expect("Could not create directory");
+        let spec_dir = SpecDir::new(dir.path()).expect("Couldn't make SpecDir");
+        let sw = SpecWatcher::run(spec_dir).expect("Couldn't create a SpecWatcher!");
 
-//     fn specs_from_watch_path<'a>(&self) -> Result<HashMap<String, ServiceSpec>> {
-//         let mut specs = HashMap::new();
-//         for spec_file in self.spec_files()? {
-//             let spec = match ServiceSpec::from_file(&spec_file) {
-//                 Ok(s) => s,
-//                 Err(e) => {
-//                     match e.err {
-//                         // If the error is related to loading a `ServiceSpec`, emit a warning
-//                         // message and continue on to the next spec file. The best we can do to
-//                         // fail-safe is report and skip.
-//                         Error::ServiceSpecParse(_) | Error::MissingRequiredIdent => {
-//                             outputln!(
-//                                 "Error when loading service spec file '{}' ({}). \
-//                                  This file will be skipped.",
-//                                 spec_file.display(),
-//                                 e.description()
-//                             );
-//                             continue;
-//                         }
-//                         // All other errors are unexpected and should be dealt with up the calling
-//                         // stack.
-//                         _ => return Err(e),
-//                     }
-//                 }
-//             };
-//             let file_stem = match spec_file.file_stem().and_then(OsStr::to_str) {
-//                 Some(s) => s,
-//                 None => {
-//                     outputln!(
-//                         "Error when loading service spec file '{}' \
-//                          (File stem could not be determined). \
-//                          This file will be skipped.",
-//                         spec_file.display()
-//                     );
-//                     continue;
-//                 }
-//             };
-//             if file_stem != &spec.ident.name {
-//                 outputln!(
-//                     "Error when loading service spec file '{}' \
-//                      (File name does not match ident name '{}' from ident = \"{}\", \
-//                      it should be called '{}.{}'). \
-//                      This file will be skipped.",
-//                     spec_file.display(),
-//                     &spec.ident.name,
-//                     &spec.ident,
-//                     &spec.ident.name,
-//                     SPEC_FILE_EXT
-//                 );
-//                 continue;
-//             }
-//             specs.insert(spec.ident.name.clone(), spec);
-//         }
-//         Ok(specs)
-//     }
+        assert!(!sw.has_events(), "There should be no events to start");
 
-//     fn have_fs_events(&mut self) -> bool {
-//         self.have_events.load(Ordering::Relaxed)
-//     }
+        file_with_content(&dir, "foo.abc123xyz", "fooooooo").expect("couldn't create file");
 
-//     fn generate_events(
-//         &mut self,
-//         mut active_specs: HashMap<String, ServiceSpec>,
-//     ) -> Result<Vec<SpecWatcherEvent>> {
-//         let mut desired_specs = self.specs_from_watch_path()?;
-//         // Reset the "have events" flag to false, now that we've loaded specs off disk
-//         self.have_events.store(false, Ordering::Relaxed);
-//         let desired_names: HashSet<_> = desired_specs.keys().map(|n| n.clone()).collect();
-//         let active_names: HashSet<_> = active_specs.keys().map(|n| n.clone()).collect();
+        assert!(
+            !sw.has_events(),
+            "Need to allow for the debounce interval to pass before you can expect events"
+        );
 
-//         let mut events = Vec::new();
+        wait_for_debounce_interval();
 
-//         // Eneueue a `RemoveService` for all services that no longer have a spec on disk.
-//         for name in active_names.difference(&desired_names) {
-//             let remove_spec = active_specs
-//                 .remove(name)
-//                 .expect("value should exist for key");
-//             let event = SpecWatcherEvent::RemoveService(remove_spec);
-//             debug!(
-//                 "Service spec for {} is gone, enqueuing {:?} event",
-//                 &name, &event
-//             );
-//             events.push(event);
-//         }
+        assert!(sw.has_events(), "There should be an event now");
+        assert!(
+            !sw.has_events(),
+            "Should be no more events after you've checked"
+        );
+    }
 
-//         // Eneueue an `AddService` for all new specs on disk without a corresponding service.
-//         for name in desired_names.difference(&active_names) {
-//             let add_spec = desired_specs
-//                 .remove(name)
-//                 .expect("value should exist for key");
-//             let event = SpecWatcherEvent::AddService(add_spec);
-//             debug!(
-//                 "Service spec for {} is new, enqueuing {:?} event",
-//                 &name, &event
-//             );
-//             events.push(event);
-//         }
+    #[test]
+    fn short_debounce_delays_also_work() {
+        let delay = lock_delay_var();
+        delay.set("1");
 
-//         // Ensure each running service doesn't have a different spec on disk. If a difference is
-//         // found we're going to do the simple thing and remove, then add the service. In the future
-//         // we should attempt to update a service in-place, if possible.
-//         for name in active_names.intersection(&desired_names) {
-//             let active_spec = active_specs
-//                 .remove(name)
-//                 .expect("value should exist for key");
-//             let desired_spec = desired_specs
-//                 .remove(name)
-//                 .expect("value should exist for key");
-//             if active_spec != desired_spec {
-//                 let remove_event = SpecWatcherEvent::RemoveService(active_spec);
-//                 let add_event = SpecWatcherEvent::AddService(desired_spec);
-//                 debug!(
-//                     "Service spec for {} is different on disk than loaded state, \
-//                      enqueuing {:?} for existing and {:?} event for updated spec",
-//                     &name, &remove_event, &add_event
-//                 );
-//                 events.push(remove_event);
-//                 events.push(add_event);
-//             }
-//         }
+        // Just verifying that our delay variable works correctly
+        assert_eq!(
+            SpecWatcherDelay::configured_value().0,
+            Duration::from_millis(1)
+        );
 
-//         // Both maps should be empty, meaning we've processed them all
-//         assert!(active_specs.is_empty());
-//         assert!(desired_specs.is_empty());
+        let dir = TempDir::new().expect("Could not create directory");
+        let spec_dir = SpecDir::new(dir.path()).expect("Couldn't make SpecDir");
+        let sw = SpecWatcher::run(spec_dir).expect("Couldn't create a SpecWatcher!");
 
-//         Ok(events)
-//     }
-// }
+        assert!(!sw.has_events(), "There should be no events to start");
 
+        file_with_content(&dir, "foo.spec", "fooooooo").expect("couldn't create file");
+
+        assert!(
+            !sw.has_events(),
+            "Need to allow for the debounce interval to pass before you can expect events"
+        );
+
+        wait_for_debounce_interval();
+
+        assert!(sw.has_events(), "There should be an event now");
+        assert!(
+            !sw.has_events(),
+            "Should be no more events after you've checked"
+        );
+    }
+
+}
 // #[cfg(test)]
 // mod test {
 //     use std::collections::HashMap;

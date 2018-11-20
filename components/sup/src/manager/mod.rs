@@ -76,8 +76,8 @@ pub use self::service::{
 use self::service_updater::ServiceUpdater;
 
 // TODO (CM): consolidate various spec-related stuff into one namespace
-use self::spec_dir::{SpecDir, SpecPath};
-use self::spec_watcher::{SpecEvent, SpecWatcher};
+use self::spec_dir::SpecDir;
+use self::spec_watcher::SpecWatcher;
 
 pub use self::sys::Sys;
 use self::user_config_watcher::UserConfigWatcher;
@@ -96,6 +96,12 @@ const MEMBER_ID_FILE: &'static str = "MEMBER_ID";
 const PROC_LOCK_FILE: &'static str = "LOCK";
 
 static LOGKEY: &'static str = "MR";
+
+pub enum ServiceOperation {
+    Start(ServiceSpec),
+    Stop(ServiceSpec),
+    Restart(ServiceSpec, ServiceSpec),
+}
 
 /// FileSystem paths that the Manager uses to persist data to disk.
 ///
@@ -360,7 +366,8 @@ impl Manager {
         let spec_dir = SpecDir::new(&fs_cfg.specs_path)?;
         spec_dir.migrate_specs();
 
-        let spec_watcher = SpecWatcher::run(&spec_dir)?;
+        // eww clone
+        let spec_watcher = SpecWatcher::run(spec_dir.clone())?;
 
         Ok(Manager {
             state: Rc::new(ManagerState {
@@ -1403,6 +1410,9 @@ impl Manager {
         self.butterfly.is_departed()
     }
 
+    // holy crap I don't think this is actually doing what we expect
+    // it to... I suspect the filewatcher may not have even been
+    // necessary! Holy christ!
     fn check_for_changed_services(&mut self) -> bool {
         let mut service_states = HashMap::new();
         let mut active_services = Vec::new();
@@ -1625,90 +1635,85 @@ impl Manager {
         Ok(())
     }
 
-    fn update_running_services_from_spec_watcher(&mut self) -> Result<()> {
-        for event in self.spec_watcher.events() {
-            trace!("Updating for event {:?}", event);
-            match event {
-                // TODO (CM): the way we do things, we'll get an Added
-                // when we modify existing spec files. That means we
-                // might need to restart a service if it has changed.
-                //
-                // Any way to push that into the SpecWatcher?
-                //
-                // Ugh... we get added when we stop a service
-                //
-                // TODO (CM): have ServiceSpec::from_file accept a
-                // SpecPath (or likely, something that implements Path)
-                SpecEvent::Added(spec_path) => match ServiceSpec::from_file(spec_path.as_ref()) {
-                    Ok(spec) => {
-                        if spec.desired_state == DesiredState::Up {
-                            self.add_service(spec);
-                        }
-                    }
-                    Err(e) => {
-                        println!(">>>>>>> e = {:?}", e);
-                    }
-                },
-                SpecEvent::Removed(spec_path) => match spec_path.service_name() {
-                    Some(name) => {
-                        let spec = {
-                            match self
-                                .state
-                                .services
-                                .read()
-                                .expect("Services lock is poisoned")
-                                .iter()
-                                .find(|(k, v)| k.name() == name)
-                            {
-                                Some((ident, service)) => service.to_spec(),
-                                None => {
-                                    println!(">>>>>>> derp");
-                                    continue;
-                                }
-                            }
-                        };
+    /// Harmonize the specs on disk with those of the
+    /// currently-running services.
+    fn reconcile_spec_files(&mut self) -> Result<Vec<ServiceOperation>> {
+        let mut currently_running = self
+            .state
+            .services
+            .read()
+            .expect("Services lock is poisoned")
+            .values()
+            .map(|s| {
+                let spec = s.to_spec();
+                (spec.ident.clone(), spec)
+            }).collect::<HashMap<_, _>>();
 
-                        if let Err(e) = self.remove_service_for_spec(&spec) {
-                            println!(">>>>>>> derp");
-                        }
-                    }
-                    None => {
-                        // TODO (CM): This shouldn't happen... pull it
-                        // into the service_name method instead
-                        println!(">>>>>>> derp");
-                    }
-                },
-                SpecEvent::Edited(spec_path) => {
-                    // TODO (CM): This generally won't happen
-                    // normally, but would potentially occur if a user
-                    // manually edits a file.
-                    match ServiceSpec::from_file(spec_path.as_ref()) {
-                        Ok(spec) => {
-                            match spec.desired_state {
-                                DesiredState::Up => {
-                                    // TODO (CM): queue for restart
+        let current_specs = self
+            .spec_dir
+            .specs()?
+            .into_iter()
+            .map(|s| (s.ident.clone(), s))
+            .collect::<HashMap<_, _>>();
 
-                                    // TODO (CM): compare existing
-                                    // spec with what would come from
-                                    // the current file?
-                                    println!(">>>>>>> WOULD RESTART {:?}", spec_path);
-                                }
-                                DesiredState::Down => {
-                                    if let Err(e) = self.remove_service_for_spec(&spec) {
-                                        println!(">>>>>>> oops");
-                                    }
-                                }
-                            }
+        let mut operations = vec![];
+        for (ident, current_spec) in current_specs.into_iter() {
+            match current_spec.desired_state {
+                DesiredState::Up => {
+                    if let Some(running_spec) = currently_running.remove(&ident) {
+                        if running_spec != current_spec {
+                            // TODO (CM): In the future, this
+                            // would be the place where we can
+                            // evaluate what has changed between
+                            // the spec-on-disk and our in-memory
+                            // representation and potentially just
+                            // bring our in-memory representation
+                            // in line without having to restart
+                            // the entire service.
+                            debug!("Reconciliation: '{}' queued for restart", ident);
+                            operations.push(ServiceOperation::Restart(running_spec, current_spec));
+                        } else {
+                            debug!("Reconciliation: '{}' unchanged", ident);
                         }
-                        Err(e) => {
-                            println!(">>>>>>> e = {:?}", e);
-                        }
+                    } else {
+                        debug!("Reconciliation: '{}' queued for start", ident);
+                        operations.push(ServiceOperation::Start(current_spec));
                     }
                 }
-                SpecEvent::NoOp => {}
+                DesiredState::Down => {
+                    if let Some(running_spec) = currently_running.remove(&ident) {
+                        debug!("Reconciliation: '{}' queued for stop", ident);
+                        operations.push(ServiceOperation::Stop(running_spec));
+                    }
+                }
             }
         }
+        for (ident, spec) in currently_running.into_iter() {
+            debug!("Reconciliation: '{}' queued for shutdown", ident);
+            operations.push(ServiceOperation::Stop(spec));
+        }
+        Ok(operations)
+        // TODO (CM): wrangle all the ? and non-? functions to do the
+        // right thing.
+    }
 
+    fn update_running_services_from_spec_watcher(&mut self) -> Result<()> {
+        if self.spec_watcher.has_events() {
+            for op in self.reconcile_spec_files()? {
+                match op {
+                    ServiceOperation::Stop(spec) => {
+                        self.remove_service_for_spec(&spec)?;
+                    }
+                    ServiceOperation::Start(spec) => {
+                        self.add_service(spec);
+                    }
+                    ServiceOperation::Restart(running, desired) => {
+                        self.remove_service_for_spec(&running)?;
+                        self.add_service(desired);
+                    }
+                }
+            }
+        }
         Ok(())
     }
 

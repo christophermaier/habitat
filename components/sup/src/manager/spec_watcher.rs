@@ -12,19 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::num::ParseIntError;
-use std::path::{Path, PathBuf};
-use std::str::FromStr;
-use std::sync::mpsc::{channel, Receiver};
-use std::time::Duration;
+use std::{
+    num::ParseIntError,
+    str::FromStr,
+    sync::mpsc::{channel, Receiver},
+    thread::Builder,
+    time::Duration,
+};
 
 use notify::{DebouncedEvent, RecommendedWatcher, RecursiveMode, Watcher};
 
-use super::spec_dir::{SpecDir, SpecPath};
+use super::spec_dir::SpecDir;
 use config::EnvConfig;
-use error::{Error, Result};
+use error::Result;
 
-static LOGKEY: &'static str = "SW";
+// static LOGKEY: &'static str = "SW";
 
 /// How long should we wait to consolidate filesystem events?
 ///
@@ -59,46 +61,46 @@ impl EnvConfig for SpecWatcherDelay {
     const ENVVAR: &'static str = "HAB_SPEC_WATCHER_DELAY_MS";
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum SpecEvent {
-    Added(SpecPath),
-    Removed(SpecPath),
-    Edited(SpecPath),
-    NoOp,
-}
+// #[derive(Debug, Clone, PartialEq, Eq)]
+// pub enum SpecEvent {
+//     Added(SpecPath),
+//     Removed(SpecPath),
+//     Edited(SpecPath),
+//     NoOp,
+// }
 
-// TODO (CM): would prefer TryFrom... NoOp doesn't really need to be
-// in here. Nothing outside of this module needs to know about NoOp
-impl From<DebouncedEvent> for SpecEvent {
-    fn from(debounced_event: DebouncedEvent) -> SpecEvent {
-        trace!("Processing debounced_event: {:?}", debounced_event,);
-        let spec_event = match debounced_event {
-            DebouncedEvent::Create(path) => SpecPath::new(path)
-                .map(|sf| SpecEvent::Added(sf))
-                .unwrap_or(SpecEvent::NoOp),
-            DebouncedEvent::Write(path) => SpecPath::new(path)
-                .map(|sf| SpecEvent::Edited(sf))
-                .unwrap_or(SpecEvent::NoOp),
-            DebouncedEvent::Remove(path) => SpecPath::new(path)
-                .map(|sf| SpecEvent::Removed(sf))
-                .unwrap_or(SpecEvent::NoOp),
-            DebouncedEvent::Rename(from, to) => {
-                // TODO (CM): doesn't look like we're picking up
-                // rename events for our temp files
-                println!(">>>>>>> renamed {:?} to {:?}", from, to);
-                SpecEvent::NoOp
-            }
+// // TODO (CM): would prefer TryFrom... NoOp doesn't really need to be
+// // in here. Nothing outside of this module needs to know about NoOp
+// impl From<DebouncedEvent> for SpecEvent {
+//     fn from(debounced_event: DebouncedEvent) -> SpecEvent {
+//         trace!("Processing debounced_event: {:?}", debounced_event,);
+//         let spec_event = match debounced_event {
+//             DebouncedEvent::Create(path) => SpecPath::new(path)
+//                 .map(|sf| SpecEvent::Added(sf))
+//                 .unwrap_or(SpecEvent::NoOp),
+//             DebouncedEvent::Write(path) => SpecPath::new(path)
+//                 .map(|sf| SpecEvent::Edited(sf))
+//                 .unwrap_or(SpecEvent::NoOp),
+//             DebouncedEvent::Remove(path) => SpecPath::new(path)
+//                 .map(|sf| SpecEvent::Removed(sf))
+//                 .unwrap_or(SpecEvent::NoOp),
+//             DebouncedEvent::Rename(from, to) => {
+//                 // TODO (CM): doesn't look like we're picking up
+//                 // rename events for our temp files
+//                 println!(">>>>>>> renamed {:?} to {:?}", from, to);
+//                 SpecEvent::NoOp
+//             }
 
-            DebouncedEvent::NoticeWrite(_)
-            | DebouncedEvent::NoticeRemove(_)
-            | DebouncedEvent::Chmod(_)
-            | DebouncedEvent::Rescan
-            | DebouncedEvent::Error(_, _) => SpecEvent::NoOp,
-        };
-        trace!("--> Processed to spec event: {:?}", spec_event);
-        spec_event
-    }
-}
+//             DebouncedEvent::NoticeWrite(_)
+//             | DebouncedEvent::NoticeRemove(_)
+//             | DebouncedEvent::Chmod(_)
+//             | DebouncedEvent::Rescan
+//             | DebouncedEvent::Error(_, _) => SpecEvent::NoOp,
+//         };
+//         trace!("--> Processed to spec event: {:?}", spec_event);
+//         spec_event
+//     }
+// }
 
 // TODO (CM): Implement some kind of Debug?
 pub struct SpecWatcher {
@@ -110,34 +112,59 @@ pub struct SpecWatcher {
 impl SpecWatcher {
     /// Start up a separate thread to listen for filesystem
     /// events.
-    pub fn run(spec_dir: &SpecDir) -> Result<SpecWatcher> {
-        let (tx, rx) = channel();
-        let delay = SpecWatcherDelay::configured_value();
-        let mut watcher = RecommendedWatcher::new(tx, delay.0)?;
-
-        // TODO (CM): why aren't we getting events for temp files in
-        // here? I'm only seeing CREATE events for edited files. If we
-        // could get renames, then this would work out OK.
+    pub fn run(spec_dir: SpecDir) -> Result<SpecWatcher> {
+        // The act of creating a `notify::Watcher` creates threads on
+        // its own. It does not, however, allow you to set the _names_
+        // of those threads.
         //
-        // Also noticing a lot of sensitivity to the duration I pass in.
-        watcher.watch(spec_dir, RecursiveMode::NonRecursive)?;
-        Ok(SpecWatcher {
-            _watcher: watcher,
-            channel: rx,
-        })
+        // We're creating a SpecWatcher in a thread just so we can get
+        // some control over the name of the threads that the
+        // underlying `notify::Watcher` creates, which makes
+        // monitoring and reasoning about the overall Supervisor
+        // process easier. There's no other reason than that; if the
+        // `notify` crate allowed us to name the threads, we could
+        // simplify this.
+
+        // TODO (CM): remove all the expects in this
+        // TODO (CM): more tightly constrain this "oneshot" paradigm
+
+        // os == "oneshot"
+        let (os_tx, os_rx) = channel();
+        let handle = Builder::new()
+            .name(String::from("spec-watcher"))
+            .spawn(move || {
+                let (tx, rx) = channel();
+                let delay = SpecWatcherDelay::configured_value();
+                let mut watcher = RecommendedWatcher::new(tx, delay.0).expect("lol");
+
+                // TODO (CM): why aren't we getting events for temp files in
+                // here? I'm only seeing CREATE events for edited files. If we
+                // could get renames, then this would work out OK.
+                //
+                // Also noticing a lot of sensitivity to the duration I pass in.
+                watcher
+                    .watch(spec_dir, RecursiveMode::NonRecursive)
+                    .expect("lulz");
+                let sw = SpecWatcher {
+                    _watcher: watcher,
+                    channel: rx,
+                };
+
+                os_tx.send(sw);
+            })?;
+
+        handle.join().expect("whee");
+
+        // TODO (CM): recv_timeout
+        Ok(os_rx.recv()?)
     }
 
     /// Return all relevant spec events since the last time we checked.
-    pub fn events(&self) -> Vec<SpecEvent> {
+    pub fn has_events(&self) -> bool {
         trace!("Asking for spec events");
-        // TODO (CM): should deduplicate these... probably only want
-        // one event per file per invocation of this function
-        self.channel
-            .try_iter()
-            // TODO (CM): use filter_map once we don't have NoOp
-            .map(SpecEvent::from)
-            .filter(|e| *e != SpecEvent::NoOp)
-            .collect()
+        // TODO (CM): Could filter the events for those that only
+        // impact spec files
+        !self.channel.try_iter().collect::<Vec<_>>().is_empty()
     }
 }
 

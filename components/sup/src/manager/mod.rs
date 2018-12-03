@@ -562,7 +562,17 @@ impl Manager {
             commands::service_load(&self.state, &mut CtlRequest::default(), svc_load)?;
         }
         // This serves to start up any services that need starting
-        self.take_action_on_services()?;
+        // TODO (CM): At the moment, when service startup is still
+        // synchronous, we expect take_action_on_services to return an
+        // empty vector of futures to spawn (since the futures will
+        // only be for service shutdowns, and nothing is running yet
+        // to shutdown!).
+        //
+        // However, once startup is also async, we'll start returning
+        // futures to run here.
+        for f in self.take_action_on_services()? {
+            runtime.spawn(f);
+        }
 
         outputln!(
             "Starting gossip-listener on {}",
@@ -704,20 +714,20 @@ impl Manager {
                 break ShutdownMode::Updating;
             }
 
-            // TODO (CM): I NEED TO RESOLVE THESE TWO CALLS
-            // for f in self.update_running_services_from_spec_watcher()? {
-            //     runtime.spawn(f);
-            // }
             if self.spec_watcher.has_events() {
-                self.take_action_on_services()?;
+                for f in self.take_action_on_services()? {
+                    runtime.spawn(f);
+                }
             }
-            //////////
 
             self.update_peers_from_watch_file()?;
             self.update_running_services_from_user_config_watcher();
+
+            // TODO (CM): this is really a restart, I think
             for f in self.shutdown_services_for_update() {
                 runtime.spawn(f);
             }
+
             self.restart_elections();
             self.census_ring.update_from_rumors(
                 &self.butterfly.service_store,
@@ -855,6 +865,13 @@ impl Manager {
         None
     }
 
+    // TODO (CM): Really, this is now a "restart" operation.
+    // Furthermore, we shouldn't really be doing a "restart" through
+    // the Launcher anymore, should we?
+    //
+    // Is there cause to do a restart _without_ going through the
+    // normal shutdown process? I don't _think_so.
+
     /// Walk each service and check if it has an updated package
     /// installed via the Update Strategy.
     ///
@@ -879,6 +896,8 @@ impl Manager {
             {
                 outputln!("Updating from {} to {}", current_ident, new_package_ident);
                 updating_packages.push(current_ident.clone());
+
+                // TODO (CM): maybe we just accumulate services directly
             }
         }
 
@@ -888,24 +907,46 @@ impl Manager {
                 // Unwrap is OK because we know that the entry is
                 // present because of what we did above.
                 let service = services.remove(&current_ident).unwrap();
-                let spec_file_path = service.spec_file.clone();
-                let spec_files = Arc::clone(&self.specs_to_reload);
 
-                // TODO (CM): log an error here if we can't remove the service
-                let f = self
-                .remove_service(service)
-                // TODO (CM): should this be `then` rather than `and_then`?
-                .and_then(move |_| {
-                    spec_files
-                        .lock()
-                        .expect("specs_to_reload lock is poisoned")
-                        .push(spec_file_path);
-                    Ok(())
-                }).map_err(|e| {
-                    outputln!("Error shutting down service for update: {:?}", e);
-                });
-                f
+                self.restart_service(service)
+                // let spec_file_path = service.spec_file.clone();
+                // let spec_files = Arc::clone(&self.specs_to_reload);
+
+                // // TODO (CM): log an error here if we can't remove the service
+                // let f = self
+                // .remove_service(service)
+                // // TODO (CM): should this be `then` rather than `and_then`?
+                // .and_then(move |_| {
+                //     spec_files
+                //         .lock()
+                //         .expect("specs_to_reload lock is poisoned")
+                //         .push(spec_file_path);
+                //     Ok(())
+                // }).map_err(|e| {
+                //     outputln!("Error shutting down service for update: {:?}", e);
+                // });
+                // f
             }).collect()
+    }
+
+    fn restart_service(&self, service: Service) -> impl Future<Item = (), Error = ()> {
+        let spec_file_path = service.spec_file.clone();
+
+        // TODO (CM): the reason we can just use &self instead of &mut
+        // self is because of this Arc.
+        let spec_files = Arc::clone(&self.specs_to_reload);
+        self
+            .remove_service(service)
+        // TODO (CM): should this be `then` rather than `and_then`?
+            .and_then(move |_| {
+                spec_files
+                    .lock()
+                    .expect("specs_to_reload lock is poisoned")
+                    .push(spec_file_path);
+                Ok(())
+            }).map_err(|e| {
+                outputln!("Error shutting down service for update: {:?}", e);
+            })
     }
 
     // Creates a rumor for the specified service.
@@ -1084,49 +1125,45 @@ impl Manager {
 
     /// Start, stop, or restart services to bring what's running in
     /// line with what our spec files say.
-    // TODO (CM): this should convert events to futures for us to
-    // spawn later.
-    fn take_action_on_services(&mut self) -> Result<()> {
-        // =======
-        //         let mut futures = vec![];
-
-        //         for service_event in self.spec_watcher.new_events(active_specs)? {
-        //             match service_event {
-        //                 SpecWatcherEvent::AddService(spec) => {
-        //                     if spec.desired_state == DesiredState::Up {
-        //                         // TODO (CM): Eventually, this will be a
-        //                         // future, and we'll just add it to our vector
-        //                         // of futures to return.
-        //                         //
-        //                         // Until then, we just do it.
-        //                         self.add_service(spec);
-        //                     }
-        //                 }
-        //                 SpecWatcherEvent::RemoveService(spec) => {
-        //                     if let Some(f) = self.remove_service_for_spec(&spec) {
-        //                         futures.push(f);
-        //                     }
-        //                 }
-        // >>>>>>> Update the Manager to shut down services asynchronously
-
+    ///
+    /// In the future, this will simply convert `ServiceOperation`s
+    /// into futures that can be later spawned. Until starting of
+    /// services is made asynchronous, however, it performs a mix of
+    /// operations; starts are performed synchronously, while
+    /// shutdowns and restarts are turned into futures.
+    //
+    // TODO: (CM) At that point, we may simply generate futures
+    // directly, rather than going through a `ServiceOperation` as an
+    // intermediary, though it may still be advantageous to keep
+    // `ServiceOperation` around for testability and
+    // separation-of-concern purposes. Restarting could be come
+    // smarter, and we might be able to quietly rearrange our current
+    // service metadata (e.g., binds) without having to restart, which
+    // could argue for keeping `ServiceOperation`.)
+    fn take_action_on_services(&mut self) -> Result<Vec<impl Future<Item = (), Error = ()>>> {
+        let mut futures = vec![];
         for op in self.reconcile_spec_files()? {
             match op {
                 ServiceOperation::Stop(spec) => {
-                    self.remove_service_for_spec(&spec);
+                    if let Some(f) = self.remove_service_for_spec(&spec) {
+                        futures.push(f)
+                    }
                 }
                 ServiceOperation::Start(spec) => {
+                    // Note: synchronous operation!
                     self.add_service(spec);
                 }
-                ServiceOperation::Restart {
-                    to_stop: running,
-                    to_start: desired,
-                } => {
-                    self.remove_service_for_spec(&running);
-                    self.add_service(desired);
+                ServiceOperation::Restart { to_stop: running } => {
+                    if let Some(f) = self.remove_service_for_spec(&running) {
+                        futures.push(f)
+                    }
+                    // TODO (CM): need to queue the addition here!
+                    // //self.remove_service_for_spec(&running);
+                    // self.add_service(desired);
                 }
             }
         }
-        Ok(())
+        Ok(futures)
     }
 
     /// Determine what services we need to start, stop, or restart in

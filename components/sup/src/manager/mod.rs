@@ -819,7 +819,7 @@ impl Manager {
                     .expect("Services lock is poisoned!");
 
                 for (_ident, svc) in svcs.drain() {
-                    let f = self.remove_service(svc).map(|_| ()).map_err(|_| ());
+                    let f = self.stop_service(svc).map(|_| ()).map_err(|_| ());
                     runtime.spawn(f);
                 }
             }
@@ -840,7 +840,18 @@ impl Manager {
         }
     }
 
-    /// Reload any services that had been removed as a result of being updated.
+    /// Reload any services that had been removed as a result of being
+    /// updated / restarted.
+    ///
+    /// Spec file paths get added to `self.specs_to_reload` at the end
+    /// of the futures that are spawned to stop the services in the
+    /// first place.
+    ///
+    /// All operations to start services are currently *synchronous*;
+    /// once service addition is asynchronous, the futures used will
+    /// just be chained onto the end of the futures that shut them
+    /// down, so this function (and `self.specs_to_reload` itself)
+    /// will no longer be needed.
     fn reload_upgraded_services(&mut self) {
         let paths: Vec<PathBuf>;
         {
@@ -934,6 +945,8 @@ impl Manager {
         // ServiceSpec or a Service there, and the need to have a
         // "desired" ServiceSpec in there seems of less use.
 
+        // Now we just turn each service into a Future that restarts
+        // that service, and return them for spawning.
         services_to_restart
             .into_iter()
             .map(|service| {
@@ -957,12 +970,12 @@ impl Manager {
         // self is because of this Arc.
         let spec_files = Arc::clone(&self.specs_to_reload);
         self
-            .remove_service(service)
+            .stop_service(service)
             // TODO (CM): should this be `then` rather than `and_then`?
             .and_then(move |_| {
                 // NOTE: This serves to mark the service for restart
                 // later.
-                // In the future, the `remove_service` future could
+                // In the future, the `stop_service` future could
                 // return the Service, or a suitable proxy, to feed
                 // directly into this, or the to-be-written future
                 // that would start the service directly.
@@ -1122,7 +1135,7 @@ impl Manager {
     // TODO (CM): Is there benefit of returning a SupError here, or not?
 
     /// Remove the given service from the manager.
-    fn remove_service(&self, service: Service) -> impl Future<Item = (), Error = SupError> {
+    fn stop_service(&self, service: Service) -> impl Future<Item = (), Error = SupError> {
         // JW TODO: Update service rumor to remove service from cluster
         let user_config_watcher = Arc::clone(&self.user_config_watcher);
         let updater = Arc::clone(&self.updater);
@@ -1211,7 +1224,7 @@ impl Manager {
                 ServiceOperation::Stop(spec) => {
                     if let Some(service) = self.remove_service_from_state(&spec) {
                         let spec_ident = spec.ident.clone();
-                        let f = self.remove_service(service).map_err(move |e| {
+                        let f = self.stop_service(service).map_err(move |e| {
                             outputln!("Error shutting down {} for removal: {:?}", spec_ident, e);
                         });
 

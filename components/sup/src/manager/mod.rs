@@ -47,7 +47,7 @@ use butterfly::member::Member;
 use butterfly::server::{timing::Timing, ServerProxy, Suitability};
 use butterfly::trace::Trace;
 use futures::prelude::*;
-use futures::sync::mpsc;
+use futures::{future::Either, sync::mpsc};
 use hcore::crypto::SymKey;
 use hcore::env;
 use hcore::os::process::{self, Pid, Signal};
@@ -673,6 +673,11 @@ impl Manager {
         // Enter the main Supervisor loop. When we break out, it'll be
         // because we've been instructed to shutdown. The value we
         // break out with governs exactly how we shut down.
+
+        // TODO (CM): If ANYTHING in this loop returns an error, we
+        // need to safely shut things down. This means the loop likely
+        // needs to be its own method.
+
         let shutdown_mode = loop {
             if feat::is_enabled(feat::TestExit) {
                 if let Ok(exit_file_path) = env::var("HAB_FEAT_TEST_EXIT") {
@@ -887,7 +892,6 @@ impl Manager {
             .services
             .write()
             .expect("Services lock is poisoned!");
-
         let mut updater = self.updater.lock().expect("Updater lock poisoned");
 
         for (current_ident, service) in services.iter() {
@@ -896,38 +900,52 @@ impl Manager {
             {
                 outputln!("Updating from {} to {}", current_ident, new_package_ident);
                 updating_packages.push(current_ident.clone());
-
-                // TODO (CM): maybe we just accumulate services directly
             }
         }
 
+        // TODO (CM): everything above is just selecting a list of
+        // services to restart, based on whether they need to be
+        // restarted or not.
+        //
+        // That's just a filter, when you boil it down. Really, a
+        // partitioning into "things that don't need updating" and
+        // "things that do need updating". If we can swap out services
+        // with "things that don't need updating", we can just freely
+        // operate on the "things that do need updating" list.
+        //
+        // Then we wouldn't even need to do an explicit remove.
+        //
+        // At that point, we can just pass all the services to the
+        // restart function
+        //
+        // Also, this is kind of duplicating the logic that the
+        // ServiceOperation::Restart is trying to do. Might it be
+        // better to translate these services into an operation
+        // instead?
+        //
+        // Implies that Restart might need to take either a
+        // ServiceSpec or a Service there, and the need to have a
+        // "desired" ServiceSpec in there seems of less use.
+
         updating_packages
             .into_iter()
-            .map(|current_ident| {
-                // Unwrap is OK because we know that the entry is
-                // present because of what we did above.
-                let service = services.remove(&current_ident).unwrap();
+            .map(|ident| {
+                // Unwrap is safe because we know there's a
+                // corresponding entry in the map.
 
-                self.restart_service(service)
-                // let spec_file_path = service.spec_file.clone();
-                // let spec_files = Arc::clone(&self.specs_to_reload);
+                // TODO (CM): we'd need to make copies of all the
+                // necessary Arcs here, if we're making
+                // restart_service not require self.
 
-                // // TODO (CM): log an error here if we can't remove the service
-                // let f = self
-                // .remove_service(service)
-                // // TODO (CM): should this be `then` rather than `and_then`?
-                // .and_then(move |_| {
-                //     spec_files
-                //         .lock()
-                //         .expect("specs_to_reload lock is poisoned")
-                //         .push(spec_file_path);
-                //     Ok(())
-                // }).map_err(|e| {
-                //     outputln!("Error shutting down service for update: {:?}", e);
-                // });
-                // f
+                self.restart_service(services.remove(&ident).unwrap())
             }).collect()
     }
+
+    // Note: `Service` should have already been removed from the
+    // internal list of services under management.
+
+    // TODO (CM): If this took the Service, UserConfigWatcher,
+    // Updater, and specs_to_reload as arguments, it wouldn't need access to self
 
     fn restart_service(&self, service: Service) -> impl Future<Item = (), Error = ()> {
         let spec_file_path = service.spec_file.clone();
@@ -937,8 +955,18 @@ impl Manager {
         let spec_files = Arc::clone(&self.specs_to_reload);
         self
             .remove_service(service)
-        // TODO (CM): should this be `then` rather than `and_then`?
+            // TODO (CM): should this be `then` rather than `and_then`?
             .and_then(move |_| {
+                // NOTE: This serves to mark the service for restart
+                // later.
+                // In the future, the `remove_service` future could
+                // return the Service, or a suitable proxy, to feed
+                // directly into this, or the to-be-written future
+                // that would start the service directly.
+                //
+                // The service to-be-started is going to be whatever
+                // is defined in the spec file on disk at the time
+                // that this gets resolved.
                 spec_files
                     .lock()
                     .expect("specs_to_reload lock is poisoned")
@@ -1085,6 +1113,11 @@ impl Manager {
             .services_data = json;
     }
 
+    // TODO (CM): If this took the Service, UserConfigWatcher, and
+    // Updater as arguments, it wouldn't need access to self
+
+    // TODO (CM): Is there benefit of returning a SupError here, or not?
+
     /// Remove the given service from the manager.
     fn remove_service(&self, service: Service) -> impl Future<Item = (), Error = SupError> {
         // JW TODO: Update service rumor to remove service from cluster
@@ -1123,6 +1156,16 @@ impl Manager {
         self.butterfly.restart_elections();
     }
 
+    // TODO (CM): Really, spec can be anything that provides an
+    // identifier (FQ or otherwise?)
+    fn remove_service_from_state(&mut self, spec: &ServiceSpec) -> Option<Service> {
+        self.state
+            .services
+            .write()
+            .expect("Services lock is poisoned")
+            .remove(&spec.ident)
+    }
+
     /// Start, stop, or restart services to bring what's running in
     /// line with what our spec files say.
     ///
@@ -1141,25 +1184,56 @@ impl Manager {
     // service metadata (e.g., binds) without having to restart, which
     // could argue for keeping `ServiceOperation`.)
     fn take_action_on_services(&mut self) -> Result<Vec<impl Future<Item = (), Error = ()>>> {
+        // Internal implementation note here... we're using Either,
+        // because that's how you can return two different types of
+        // futures as the "same" future. Yes, we're returning "impl
+        // Future"s, but the compiler still has to reconcile that to
+        // one thing under the hood.
+        //
+        // There isn't yet an official "Either3" for us to use once adding
+        // services is represented as a future. That would be easy to
+        // implement, though, or we could fake it with some kind of
+        // Either stack:
+        //
+        // (i.e., something like
+        //   Either::A(first),
+        //   Either::B(Either::A(second)),
+        //   Either::B(Either::B(third))
+        //
+        // (though at that point, just implement Either3 and be done
+        // with it).
         let mut futures = vec![];
         for op in self.reconcile_spec_files()? {
             match op {
                 ServiceOperation::Stop(spec) => {
-                    if let Some(f) = self.remove_service_for_spec(&spec) {
-                        futures.push(f)
+                    if let Some(service) = self.remove_service_from_state(&spec) {
+                        let spec_ident = spec.ident.clone();
+                        let f = self.remove_service(service).map_err(move |e| {
+                            outputln!("Error shutting down {} for removal: {:?}", spec_ident, e);
+                        });
+
+                        futures.push(Either::A(f));
+                    } else {
+                        // TODO (CM): THIS SHOULD NEVER HAPPEN
+                        outputln!(
+                            "Tried to remove service for {} but could not find it running, skipping",
+                            &spec.ident
+                        );
                     }
                 }
                 ServiceOperation::Start(spec) => {
-                    // Note: synchronous operation!
+                    // Note: synchronous operation!  Once this is a
+                    // future, it would end up being the
+                    // "Either3::C(...)" variant alluded to above
                     self.add_service(spec);
                 }
                 ServiceOperation::Restart { to_stop: running } => {
-                    if let Some(f) = self.remove_service_for_spec(&running) {
-                        futures.push(f)
+                    if let Some(service) = self.remove_service_from_state(&running) {
+                        let f = self.restart_service(service);
+                        futures.push(Either::B(f));
+                    } else {
+                        // TODO (CM): THIS SHOULD NEVER HAPPEN
                     }
-                    // TODO (CM): need to queue the addition here!
-                    // //self.remove_service_for_spec(&running);
-                    // self.add_service(desired);
                 }
             }
         }
@@ -1316,36 +1390,6 @@ impl Manager {
             {
                 outputln!("user.toml changes detected for {}", &service.spec_ident);
                 service.user_config_updated = true;
-            }
-        }
-    }
-
-    fn remove_service_for_spec(
-        &mut self,
-        spec: &ServiceSpec,
-    ) -> Option<impl Future<Item = (), Error = ()>> {
-        let svc = self
-            .state
-            .services
-            .write()
-            .expect("Services lock is poisoned")
-            .remove(&spec.ident);
-
-        match svc {
-            Some(service) => {
-                let spec_ident = spec.ident.clone();
-                let f = self.remove_service(service).map_err(move |e| {
-                    outputln!("Error shutting down {} for removal: {:?}", spec_ident, e);
-                });
-
-                return Some(f);
-            }
-            None => {
-                outputln!(
-                    "Tried to remove service for {} but could not find it running, skipping",
-                    &spec.ident
-                );
-                return None;
             }
         }
     }

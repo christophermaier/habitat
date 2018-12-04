@@ -31,7 +31,9 @@ use std;
 use std::collections::HashMap;
 use std::fs::{self, File, OpenOptions};
 use std::io::{BufRead, BufReader, Read, Write};
+use std::mem;
 use std::net::SocketAddr;
+use std::ops::DerefMut;
 use std::path::{Path, PathBuf};
 use std::result;
 use std::str::FromStr;
@@ -885,36 +887,41 @@ impl Manager {
     ///
     /// (The futures need to be spawned.)
     fn shutdown_services_for_update(&mut self) -> Vec<impl Future<Item = (), Error = ()>> {
-        let mut updating_packages = vec![];
+        // This code removes all Services that need to be restarted
+        // for updates from the main list of services and returns
+        // those Services for appropriate handling
+        let services_to_restart = {
+            let mut updater = self.updater.lock().expect("Updater lock poisoned");
 
-        let mut services = self
-            .state
-            .services
-            .write()
-            .expect("Services lock is poisoned!");
-        let mut updater = self.updater.lock().expect("Updater lock poisoned");
+            let mut working_set = HashMap::new();
+            let mut state_services = self
+                .state
+                .services
+                .write()
+                .expect("Services lock is poisoned!");
+            mem::swap(state_services.deref_mut(), &mut working_set);
 
-        for (current_ident, service) in services.iter() {
-            if let Some(new_package_ident) =
-                updater.check_for_updated_package(service, &self.census_ring)
-            {
-                outputln!("Updating from {} to {}", current_ident, new_package_ident);
-                updating_packages.push(current_ident.clone());
-            }
-        }
+            let (to_restart, mut no_action) =
+                working_set.drain().partition(|(current_ident, service)| {
+                    match updater.check_for_updated_package(&service, &self.census_ring) {
+                        Some(new_package_ident) => {
+                            outputln!("Updating from {} to {}", current_ident, new_package_ident);
+                            true
+                        }
+                        None => {
+                            trace!("No update found for {}", current_ident);
+                            false
+                        }
+                    }
+                });
+            mem::swap(&mut no_action, state_services.deref_mut());
 
-        // TODO (CM): everything above is just selecting a list of
-        // services to restart, based on whether they need to be
-        // restarted or not.
-        //
-        // That's just a filter, when you boil it down. Really, a
-        // partitioning into "things that don't need updating" and
-        // "things that do need updating". If we can swap out services
-        // with "things that don't need updating", we can just freely
-        // operate on the "things that do need updating" list.
-        //
-        // Then we wouldn't even need to do an explicit remove.
-        //
+            to_restart
+                .into_iter()
+                .map(|(_ident, service)| service)
+                .collect::<Vec<Service>>()
+        };
+
         // At that point, we can just pass all the services to the
         // restart function
         //
@@ -927,17 +934,13 @@ impl Manager {
         // ServiceSpec or a Service there, and the need to have a
         // "desired" ServiceSpec in there seems of less use.
 
-        updating_packages
+        services_to_restart
             .into_iter()
-            .map(|ident| {
-                // Unwrap is safe because we know there's a
-                // corresponding entry in the map.
-
+            .map(|service| {
                 // TODO (CM): we'd need to make copies of all the
                 // necessary Arcs here, if we're making
                 // restart_service not require self.
-
-                self.restart_service(services.remove(&ident).unwrap())
+                self.restart_service(service)
             }).collect()
     }
 

@@ -1243,7 +1243,9 @@ impl Manager {
                     // "Either3::C(...)" variant alluded to above
                     self.add_service(spec);
                 }
-                ServiceOperation::Restart { to_stop: running } => {
+                ServiceOperation::Restart {
+                    to_stop: running, ..
+                } => {
                     if let Some(service) = self.remove_service_from_state(&running) {
                         let f = self.restart_service(service);
                         futures.push(Either::B(f));

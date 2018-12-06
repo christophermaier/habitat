@@ -711,7 +711,7 @@ impl Manager {
                 }
             }
 
-            self.reload_upgraded_services();
+            self.finish_restarting_services();
 
             if let Some(package) = self.check_for_updated_supervisor() {
                 outputln!(
@@ -840,8 +840,8 @@ impl Manager {
         }
     }
 
-    /// Reload any services that had been removed as a result of being
-    /// updated / restarted.
+    /// Any services that were shut down in preparation for a restart,
+    /// and have successfully shut down, can now be restarted.
     ///
     /// Spec file paths get added to `self.specs_to_reload` at the end
     /// of the futures that are spawned to stop the services in the
@@ -852,15 +852,18 @@ impl Manager {
     /// just be chained onto the end of the futures that shut them
     /// down, so this function (and `self.specs_to_reload` itself)
     /// will no longer be needed.
-    fn reload_upgraded_services(&mut self) {
-        let paths: Vec<PathBuf>;
-        {
-            let mut spec_files = self
-                .specs_to_reload
-                .lock()
-                .expect("specs_to_reload lock poisoned");
-            paths = spec_files.drain(..).collect();
-        }
+    fn finish_restarting_services(&mut self) {
+        let paths = {
+            let mut paths = vec![];
+            mem::swap(
+                self.specs_to_reload
+                    .lock()
+                    .expect("specs_to_reload lock poisoned")
+                    .deref_mut(),
+                &mut paths,
+            );
+            paths
+        };
 
         for spec_file in paths.into_iter() {
             match ServiceSpec::from_file(&spec_file) {

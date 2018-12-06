@@ -257,16 +257,14 @@ pub struct Manager {
     service_states: HashMap<PackageIdent, Timespec>,
     sys: Arc<Sys>,
     http_disable: bool,
-    /// When we're upgrading a service, we remove it from the
-    /// Supervisor and add it back. Due to the behavior of Futures and
-    /// the current data structures we have, the most straightforward
-    /// thing to do is add the specfile of the service in question to
-    /// this vec after we've successfully shut it down. Once it's
-    /// there, we can act on them in our (non-Tokio-driven) main loop
-    /// to re-load them.
-    ///
-    /// It's a Mutex because we only ever write.
-    specs_to_reload: Arc<Mutex<Vec<PathBuf>>>,
+    /// When we're upgrading or restarting a service, we remove it
+    /// from the Supervisor and add it back. Due to the behavior of
+    /// Futures and the current data structures we have, the most
+    /// straightforward thing to do is add the spec file of the
+    /// service in question to this vec after we've successfully shut
+    /// it down. Once it's there, we can act on them in our
+    /// (non-Tokio-driven) main loop to re-load them.
+    specs_to_restart: Arc<Mutex<Vec<PathBuf>>>,
 }
 
 impl Manager {
@@ -381,7 +379,7 @@ impl Manager {
             service_states: HashMap::new(),
             sys: Arc::new(sys),
             http_disable: cfg.http_disable,
-            specs_to_reload: Arc::new(Mutex::new(Vec::new())),
+            specs_to_restart: Arc::new(Mutex::new(Vec::new())),
         })
     }
 
@@ -843,22 +841,22 @@ impl Manager {
     /// Any services that were shut down in preparation for a restart,
     /// and have successfully shut down, can now be restarted.
     ///
-    /// Spec file paths get added to `self.specs_to_reload` at the end
+    /// Spec file paths get added to `self.specs_to_restart` at the end
     /// of the futures that are spawned to stop the services in the
     /// first place.
     ///
     /// All operations to start services are currently *synchronous*;
     /// once service addition is asynchronous, the futures used will
     /// just be chained onto the end of the futures that shut them
-    /// down, so this function (and `self.specs_to_reload` itself)
+    /// down, so this function (and `self.specs_to_restart` itself)
     /// will no longer be needed.
     fn finish_restarting_services(&mut self) {
         let paths = {
             let mut paths = vec![];
             mem::swap(
-                self.specs_to_reload
+                self.specs_to_restart
                     .lock()
-                    .expect("specs_to_reload lock poisoned")
+                    .expect("specs_to_restart lock poisoned")
                     .deref_mut(),
                 &mut paths,
             );
@@ -964,14 +962,14 @@ impl Manager {
     // internal list of services under management.
 
     // TODO (CM): If this took the Service, UserConfigWatcher,
-    // Updater, and specs_to_reload as arguments, it wouldn't need access to self
+    // Updater, and specs_to_restart as arguments, it wouldn't need access to self
 
     fn restart_service(&self, service: Service) -> impl Future<Item = (), Error = ()> {
         let spec_file_path = service.spec_file.clone();
 
         // TODO (CM): the reason we can just use &self instead of &mut
         // self is because of this Arc.
-        let spec_files = Arc::clone(&self.specs_to_reload);
+        let spec_files = Arc::clone(&self.specs_to_restart);
         self
             .stop_service(service)
             // TODO (CM): should this be `then` rather than `and_then`?
@@ -988,7 +986,7 @@ impl Manager {
                 // that this gets resolved.
                 spec_files
                     .lock()
-                    .expect("specs_to_reload lock is poisoned")
+                    .expect("specs_to_restart lock is poisoned")
                     .push(spec_file_path);
                 Ok(())
             }).map_err(|e| {

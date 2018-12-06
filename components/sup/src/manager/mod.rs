@@ -31,6 +31,7 @@ use std;
 use std::collections::HashMap;
 use std::fs::{self, File, OpenOptions};
 use std::io::{BufRead, BufReader, Read, Write};
+use std::iter::IntoIterator;
 use std::mem;
 use std::net::SocketAddr;
 use std::ops::DerefMut;
@@ -728,8 +729,7 @@ impl Manager {
             self.update_peers_from_watch_file()?;
             self.update_running_services_from_user_config_watcher();
 
-            // TODO (CM): this is really a restart, I think
-            for f in self.shutdown_services_for_update() {
+            for f in self.restart_services_with_updates() {
                 runtime.spawn(f);
             }
 
@@ -817,7 +817,7 @@ impl Manager {
                     .expect("Services lock is poisoned!");
 
                 for (_ident, svc) in svcs.drain() {
-                    let f = self.stop_service(svc).map(|_| ()).map_err(|_| ());
+                    let f = self.service_stop_future(svc).map_err(|_| ());
                     runtime.spawn(f);
                 }
             }
@@ -884,6 +884,38 @@ impl Manager {
         None
     }
 
+    /// Return the Services that currently have a newer package in
+    /// Builder. These are removed from the internal `services` vec
+    /// for further transformation into "restarting" futures.
+    fn take_services_with_updates(&mut self) -> impl IntoIterator<Item = Service> {
+        let mut updater = self.updater.lock().expect("Updater lock poisoned");
+
+        let mut working_set = HashMap::new();
+        let mut state_services = self
+            .state
+            .services
+            .write()
+            .expect("Services lock is poisoned!");
+        mem::swap(state_services.deref_mut(), &mut working_set);
+
+        let (to_restart, mut no_action) =
+            working_set.drain().partition(|(current_ident, service)| {
+                match updater.check_for_updated_package(&service, &self.census_ring) {
+                    Some(new_package_ident) => {
+                        outputln!("Updating from {} to {}", current_ident, new_package_ident);
+                        true
+                    }
+                    None => {
+                        trace!("No update found for {}", current_ident);
+                        false
+                    }
+                }
+            });
+        mem::swap(&mut no_action, state_services.deref_mut());
+
+        to_restart.into_iter().map(|(_ident, service)| service)
+    }
+
     // TODO (CM): Really, this is now a "restart" operation.
     // Furthermore, we shouldn't really be doing a "restart" through
     // the Launcher anymore, should we?
@@ -891,49 +923,11 @@ impl Manager {
     // Is there cause to do a restart _without_ going through the
     // normal shutdown process? I don't _think_so.
 
-    /// Walk each service and check if it has an updated package
-    /// installed via the Update Strategy.
-    ///
     /// Returns a Vec of futures for shutting down those services and
     /// subsequently queue them up for restart by the manager.
     ///
     /// (The futures need to be spawned.)
-    fn shutdown_services_for_update(&mut self) -> Vec<impl Future<Item = (), Error = ()>> {
-        // This code removes all Services that need to be restarted
-        // for updates from the main list of services and returns
-        // those Services for appropriate handling
-        let services_to_restart = {
-            let mut updater = self.updater.lock().expect("Updater lock poisoned");
-
-            let mut working_set = HashMap::new();
-            let mut state_services = self
-                .state
-                .services
-                .write()
-                .expect("Services lock is poisoned!");
-            mem::swap(state_services.deref_mut(), &mut working_set);
-
-            let (to_restart, mut no_action) =
-                working_set.drain().partition(|(current_ident, service)| {
-                    match updater.check_for_updated_package(&service, &self.census_ring) {
-                        Some(new_package_ident) => {
-                            outputln!("Updating from {} to {}", current_ident, new_package_ident);
-                            true
-                        }
-                        None => {
-                            trace!("No update found for {}", current_ident);
-                            false
-                        }
-                    }
-                });
-            mem::swap(&mut no_action, state_services.deref_mut());
-
-            to_restart
-                .into_iter()
-                .map(|(_ident, service)| service)
-                .collect::<Vec<Service>>()
-        };
-
+    fn restart_services_with_updates(&mut self) -> Vec<impl Future<Item = (), Error = ()>> {
         // At that point, we can just pass all the services to the
         // restart function
         //
@@ -948,13 +942,13 @@ impl Manager {
 
         // Now we just turn each service into a Future that restarts
         // that service, and return them for spawning.
-        services_to_restart
+        self.take_services_with_updates()
             .into_iter()
             .map(|service| {
                 // TODO (CM): we'd need to make copies of all the
                 // necessary Arcs here, if we're making
-                // restart_service not require self.
-                self.restart_service(service)
+                // service_restart_future not require self.
+                self.service_restart_future(service)
             }).collect()
     }
 
@@ -964,19 +958,19 @@ impl Manager {
     // TODO (CM): If this took the Service, UserConfigWatcher,
     // Updater, and specs_to_restart as arguments, it wouldn't need access to self
 
-    fn restart_service(&self, service: Service) -> impl Future<Item = (), Error = ()> {
+    fn service_restart_future(&self, service: Service) -> impl Future<Item = (), Error = ()> {
         let spec_file_path = service.spec_file.clone();
 
         // TODO (CM): the reason we can just use &self instead of &mut
         // self is because of this Arc.
         let spec_files = Arc::clone(&self.specs_to_restart);
         self
-            .stop_service(service)
+            .service_stop_future(service)
             // TODO (CM): should this be `then` rather than `and_then`?
             .and_then(move |_| {
                 // NOTE: This serves to mark the service for restart
                 // later.
-                // In the future, the `stop_service` future could
+                // In the future, the `service_stop_future` future could
                 // return the Service, or a suitable proxy, to feed
                 // directly into this, or the to-be-written future
                 // that would start the service directly.
@@ -1136,7 +1130,7 @@ impl Manager {
     // TODO (CM): Is there benefit of returning a SupError here, or not?
 
     /// Remove the given service from the manager.
-    fn stop_service(&self, service: Service) -> impl Future<Item = (), Error = SupError> {
+    fn service_stop_future(&self, service: Service) -> impl Future<Item = (), Error = SupError> {
         // JW TODO: Update service rumor to remove service from cluster
         let user_config_watcher = Arc::clone(&self.user_config_watcher);
         let updater = Arc::clone(&self.updater);
@@ -1225,7 +1219,7 @@ impl Manager {
                 ServiceOperation::Stop(spec) => {
                     if let Some(service) = self.remove_service_from_state(&spec) {
                         let spec_ident = spec.ident.clone();
-                        let f = self.stop_service(service).map_err(move |e| {
+                        let f = self.service_stop_future(service).map_err(move |e| {
                             outputln!("Error shutting down {} for removal: {:?}", spec_ident, e);
                         });
 
@@ -1248,8 +1242,7 @@ impl Manager {
                     to_stop: running, ..
                 } => {
                     if let Some(service) = self.remove_service_from_state(&running) {
-                        let f = self.restart_service(service);
-                        futures.push(Either::B(f));
+                        futures.push(Either::B(self.service_restart_future(service)));
                     } else {
                         // TODO (CM): THIS SHOULD NEVER HAPPEN
                     }

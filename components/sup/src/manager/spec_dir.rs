@@ -4,13 +4,14 @@ use std::iter::IntoIterator;
 use std::path::Path;
 use std::path::PathBuf;
 
+use hcore::package::PackageIdent;
+
 use glob;
 
 use super::service::spec::ServiceSpec;
 use error::{Error, Result};
 
 static LOGKEY: &'static str = "SD";
-const SPEC_FILE_EXT: &'static str = "spec";
 const SPEC_FILE_GLOB: &'static str = "*.spec";
 
 #[derive(Debug, Clone)]
@@ -23,6 +24,8 @@ impl AsRef<Path> for SpecDir {
 }
 
 impl SpecDir {
+    pub const SPEC_FILE_EXT: &'static str = "spec";
+
     pub fn new<P>(path: P) -> Result<SpecDir>
     where
         P: AsRef<Path>,
@@ -103,7 +106,7 @@ impl SpecDir {
                         &spec.ident.name,
                         &spec.ident,
                         &spec.ident.name,
-                        SPEC_FILE_EXT
+                        Self::SPEC_FILE_EXT
                     );
                     continue;
                 }
@@ -128,5 +131,9 @@ impl SpecDir {
             .expect("Invalid spec file glob pattern!")
             .filter_map(glob::GlobResult::ok)
             .filter(|p| p.is_file())
+    }
+
+    pub fn spec_file_for_service(&self, ident: &PackageIdent) -> PathBuf {
+        self.0.join(&ident.name).with_extension(Self::SPEC_FILE_EXT)
     }
 }

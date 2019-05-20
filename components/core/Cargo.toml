@@ -6,11 +6,17 @@ authors = ["The Habitat Maintainers <humans@habitat.sh>"]
 workspace = "../../"
 build = "build.rs"
 
+[[bin]]
+name = "network_tester"
+path = "src/network_tester.rs"
+doc = false
+
 [build-dependencies]
 base64 = "*"
 cc = "*"
 
 [dependencies]
+get_if_addrs = "*"
 base64 = "*"
 dirs = "*"
 dns-lookup = "*"
